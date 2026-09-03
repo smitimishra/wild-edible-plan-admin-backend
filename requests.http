@@ -1,0 +1,122 @@
+
+
+### ============================================================
+### ADMIN LOGIN
+### ============================================================
+
+POST http://192.168.29.51:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "Admin@123"
+}
+
+
+
+
+
+
+
+#################
+GET http://192.168.29.51:3000/api/admin/hierarchy
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTQsImVtYWlsIjoiYWRtaW5AZXhhbXBsZS5jb20iLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE3ODc2ODM1NDksImV4cCI6MTc4NzY4NzE0OX0.snnO2d28IYv2jjS7WBdgqCRar9T1cRLCxTNHarm5FFU
+
+
+
+
+
+
+
+
+
+###################
+POST http://192.168.29.51:3000/api/admin/hierarchy
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTQsImVtYWlsIjoiYWRtaW5AZXhhbXBsZS5jb20iLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE3ODc2ODM3NTAsImV4cCI6MTc4NzY4NzM1MH0.QBpCupNQW0gcKfP4gu_qnU_ab7KKbnIMFpsfX9DQJsU
+Content-Type: application/json
+
+{
+  "approval_level": 3,
+  "role": "HR"
+}
+
+
+
+
+#########
+POST http://192.168.29.51:3000/api/admin/hierarchy
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTQsImVtYWlsIjoiYWRtaW5AZXhhbXBsZS5jb20iLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE3ODc2ODM3NTAsImV4cCI6MTc4NzY4NzM1MH0.QBpCupNQW0gcKfP4gu_qnU_ab7KKbnIMFpsfX9DQJsU
+Content-Type: application/json
+
+{
+  "approval_level": 2,
+  "role": "GENERAL MANAGER"
+}
+
+
+
+
+
+
+
+########
+
+GET http://192.168.29.51:3000/api/admin/hierarchy
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTQsImVtYWlsIjoiYWRtaW5AZXhhbXBsZS5jb20iLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE3ODc2ODM3NTAsImV4cCI6MTc4NzY4NzM1MH0.QBpCupNQW0gcKfP4gu_qnU_ab7KKbnIMFpsfX9DQJsU
+
+
+
+
+
+
+##############
+DELETE http://192.168.29.51:3000/api/admin/hierarchy/7
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTQsImVtYWlsIjoiYWRtaW5AZXhhbXBsZS5jb20iLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE3ODc2ODM5NzYsImV4cCI6MTc4NzY4NzU3Nn0.n0mSlG-d-l935xbu-c0QzxVLkvsasWFuFPsUIJTPuyw
+
+
+
+
+
+
+
+
+
+
+##############
+PUT http://192.168.29.51:3000/api/admin/hierarchy/1
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTQsImVtYWlsIjoiYWRtaW5AZXhhbXBsZS5jb20iLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE3ODc2ODQ2OTQsImV4cCI6MTc4NzY4ODI5NH0.TZ7mKIanwuajaZdK1I4q25hOdNpL6z_RY-vkkBUjn2o
+Content-Type: application/json
+
+{
+  "approval_level": 2,
+  "role": "MANAGER"
+}
+
+
+
+
+#########
+PUT http://192.168.29.51:3000/api/admin/hierarchy/1
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTQsImVtYWlsIjoiYWRtaW5AZXhhbXBsZS5jb20iLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE3ODc2ODQ2OTQsImV4cCI6MTc4NzY4ODI5NH0.TZ7mKIanwuajaZdK1I4q25hOdNpL6z_RY-vkkBUjn2o
+Content-Type: application/json
+
+{
+  "approval_level": 1,
+  "role": "MANAGER"
+}
+
+
+
+
+
+
+
+
+###########################
+POST http://192.168.29.51:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "john@example.com",
+  "password": "Employee@123"
+}
