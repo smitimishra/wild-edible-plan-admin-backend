@@ -4,7 +4,7 @@
 ### ADMIN LOGIN
 ### ============================================================
 
-POST http://192.168.29.51:3000/api/auth/login
+POST http://192.168.29.51:3001/api/auth/login
 Content-Type: application/json
 
 {
@@ -19,7 +19,7 @@ Content-Type: application/json
 
 
 #################
-GET http://192.168.29.51:3000/api/admin/hierarchy
+GET http://192.168.29.51:3001/api/admin/hierarchy
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTQsImVtYWlsIjoiYWRtaW5AZXhhbXBsZS5jb20iLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE3ODc2ODM1NDksImV4cCI6MTc4NzY4NzE0OX0.snnO2d28IYv2jjS7WBdgqCRar9T1cRLCxTNHarm5FFU
 
 
@@ -31,7 +31,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTQsImVtYWlsI
 
 
 ###################
-POST http://192.168.29.51:3000/api/admin/hierarchy
+POST http://192.168.29.51:3001/api/admin/hierarchy
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTQsImVtYWlsIjoiYWRtaW5AZXhhbXBsZS5jb20iLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE3ODc2ODM3NTAsImV4cCI6MTc4NzY4NzM1MH0.QBpCupNQW0gcKfP4gu_qnU_ab7KKbnIMFpsfX9DQJsU
 Content-Type: application/json
 
@@ -44,7 +44,7 @@ Content-Type: application/json
 
 
 #########
-POST http://192.168.29.51:3000/api/admin/hierarchy
+POST http://192.168.29.51:3001/api/admin/hierarchy
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTQsImVtYWlsIjoiYWRtaW5AZXhhbXBsZS5jb20iLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE3ODc2ODM3NTAsImV4cCI6MTc4NzY4NzM1MH0.QBpCupNQW0gcKfP4gu_qnU_ab7KKbnIMFpsfX9DQJsU
 Content-Type: application/json
 
@@ -61,7 +61,7 @@ Content-Type: application/json
 
 ########
 
-GET http://192.168.29.51:3000/api/admin/hierarchy
+GET http://192.168.29.51:3001/api/admin/hierarchy
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTQsImVtYWlsIjoiYWRtaW5AZXhhbXBsZS5jb20iLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE3ODc2ODM3NTAsImV4cCI6MTc4NzY4NzM1MH0.QBpCupNQW0gcKfP4gu_qnU_ab7KKbnIMFpsfX9DQJsU
 
 
@@ -70,7 +70,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTQsImVtYWlsI
 
 
 ##############
-DELETE http://192.168.29.51:3000/api/admin/hierarchy/7
+DELETE http://192.168.29.51:3001/api/admin/hierarchy/7
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTQsImVtYWlsIjoiYWRtaW5AZXhhbXBsZS5jb20iLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE3ODc2ODM5NzYsImV4cCI6MTc4NzY4NzU3Nn0.n0mSlG-d-l935xbu-c0QzxVLkvsasWFuFPsUIJTPuyw
 
 
@@ -83,7 +83,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTQsImVtYWlsI
 
 
 ##############
-PUT http://192.168.29.51:3000/api/admin/hierarchy/1
+PUT http://192.168.29.51:3001/api/admin/hierarchy/1
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTQsImVtYWlsIjoiYWRtaW5AZXhhbXBsZS5jb20iLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE3ODc2ODQ2OTQsImV4cCI6MTc4NzY4ODI5NH0.TZ7mKIanwuajaZdK1I4q25hOdNpL6z_RY-vkkBUjn2o
 Content-Type: application/json
 
@@ -96,7 +96,7 @@ Content-Type: application/json
 
 
 #########
-PUT http://192.168.29.51:3000/api/admin/hierarchy/1
+PUT http://192.168.29.51:3001/api/admin/hierarchy/1
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MTQsImVtYWlsIjoiYWRtaW5AZXhhbXBsZS5jb20iLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE3ODc2ODQ2OTQsImV4cCI6MTc4NzY4ODI5NH0.TZ7mKIanwuajaZdK1I4q25hOdNpL6z_RY-vkkBUjn2o
 Content-Type: application/json
 
@@ -113,7 +113,7 @@ Content-Type: application/json
 
 
 ###########################
-POST http://192.168.29.51:3000/api/auth/login
+POST http://192.168.29.51:3001/api/auth/login
 Content-Type: application/json
 
 {

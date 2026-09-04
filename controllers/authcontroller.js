@@ -591,7 +591,7 @@ const forgotPassword = async (req, res) => {
         // ----------------------------------------------------
 
         const resetUrl =
-            `http://192.168.29.51:4200/reset-password?token=${resetToken}`;
+            `http://192.168.29.51:62878/reset-password?token=${resetToken}`;
 
 
         // ----------------------------------------------------
