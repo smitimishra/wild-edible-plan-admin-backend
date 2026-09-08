@@ -2,1315 +2,1284 @@ const pool = require("../config/db");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 
+// ADMIN CONTROLLER
+//
+// ROLE MAPPING
+//
+// role_id = 1  -> ADMIN
+// role_id = 2  -> EMPLOYEE / FIELD STAFF
+// role_id = 3  -> REVIEWER
+//
+// EMPLOYEE CODE
+//
+// ADMIN              -> AD001, AD002, ...
+// EMPLOYEE/FIELD     -> FDS001, FDS002, ...
+// REVIEWER           -> RE001, RE002, ...
+//
+// APPROVAL POSITION
+//
+// ADMIN              -> NULL
+// EMPLOYEE/FIELD     -> NULL
+// REVIEWER           -> REVIEWER
+//
 
-// ============================================================
-// GET ALL USERS
-// ADMIN ONLY
-// ============================================================
+// CONSTANTS
 
-const getUsers = async (req, res) => {
-
-    try {
-
-        const result = await pool.query(
-            `
-            SELECT
-                id,
-                employee_code,
-                name,
-                email,
-                role,
-                approval_position,
-                created_at,
-                is_active
-            FROM users
-            ORDER BY name
-            `
-        );
-
-        return res.status(200).json({
-            users: result.rows
-        });
-
-    } catch (error) {
-
-        console.error(
-            "Admin get users error:",
-            error
-        );
-
-        return res.status(500).json({
-            message:
-                "Unable to retrieve users"
-        });
-
-    }
-
+const ROLE_NAMES = {
+  1: "ADMIN",
+  2: "EMPLOYEE",
+  3: "REVIEWER",
 };
 
+const ROLE_PREFIXES = {
+  1: "AD",
+  2: "FDS",
+  3: "RE",
+};
 
-// ============================================================
+const ALLOWED_ROLE_IDS = [1, 2, 3];
+
+// HELPER FUNCTIONS
+
+const getRoleName = (roleId) => {
+  return ROLE_NAMES[Number(roleId)] || "";
+};
+
+const getRoleId = (role) => {
+  if (role === undefined || role === null || String(role).trim() === "") {
+    return NaN;
+  }
+
+  if (typeof role === "number" || !isNaN(Number(role))) {
+    return Number(role);
+  }
+
+  const normalizedRole = String(role).trim().toUpperCase();
+
+  if (normalizedRole === "ADMIN") {
+    return 1;
+  }
+
+  if (
+    normalizedRole === "EMPLOYEE" ||
+    normalizedRole === "FIELD STAFF" ||
+    normalizedRole === "FIELD_STAFF"
+  ) {
+    return 2;
+  }
+
+  if (normalizedRole === "REVIEWER") {
+    return 3;
+  }
+
+  return NaN;
+};
+
+const normalizeEmail = (email) => {
+  if (email === undefined || email === null) {
+    return null;
+  }
+
+  const value = String(email).trim().toLowerCase();
+
+  return value || null;
+};
+
+const normalizeName = (name) => {
+  if (name === undefined || name === null) {
+    return null;
+  }
+
+  const value = String(name).trim();
+
+  return value || null;
+};
+
+const normalizePhone = (phone) => {
+  if (phone === undefined || phone === null || String(phone).trim() === "") {
+    return null;
+  }
+
+  return String(phone).trim();
+};
+
+// GENERATE EMPLOYEE CODE
+//
+// Examples:
+//
+// ADMIN     -> AD001
+// EMPLOYEE  -> FDS001
+// REVIEWER  -> RE001
+//
+// A transaction advisory lock is used so two Admin users
+// cannot generate the same employee code simultaneously.
+
+const generateEmployeeCode = async (client, roleId) => {
+  const prefix = ROLE_PREFIXES[Number(roleId)];
+
+  if (!prefix) {
+    throw new Error("Invalid role for employee code generation");
+  }
+
+  await client.query(
+    `
+        SELECT pg_advisory_xact_lock(
+            hashtext('admin_employee_code_generation')
+        )
+        `,
+  );
+
+  const result = await client.query(
+    `
+            SELECT
+                COALESCE(
+                    MAX(
+                        CAST(
+                            SUBSTRING(
+                                employee_code
+                                FROM LENGTH($1) + 1
+                            ) AS INTEGER
+                        )
+                    ),
+                    0
+                ) + 1 AS next_number
+
+            FROM user_table
+
+            WHERE employee_code ~
+                ('^' || $1 || '[0-9]+$')
+            `,
+    [prefix],
+  );
+
+  const nextNumber = Number(result.rows[0].next_number);
+
+  return prefix + String(nextNumber).padStart(3, "0");
+};
+
+// GET REVIEWER APPROVAL POSITION
+
+const getReviewerApprovalPosition = async (client) => {
+  const result = await client.query(
+    `
+            SELECT
+                id,
+                approval_level,
+                role
+
+            FROM approval_workflow_hierarchy
+
+            WHERE UPPER(TRIM(role)) = 'REVIEWER'
+
+            ORDER BY approval_level ASC
+
+            LIMIT 1
+            `,
+  );
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  return {
+    id: result.rows[0].id,
+    role: "REVIEWER",
+  };
+};
+
+// BUILD USER RESPONSE
+
+const formatUser = (user) => {
+  return {
+    id: user.user_id,
+    user_id: user.user_id,
+
+    role_id: user.role_id,
+    role: getRoleName(user.role_id),
+
+    name: user.user_name,
+    user_name: user.user_name,
+
+    phone_number: user.phone_number,
+
+    email: user.email_id,
+    email_id: user.email_id,
+
+    employee_code: user.employee_code,
+
+    is_active:
+      user.is_active === undefined || user.is_active === null
+        ? true
+        : user.is_active,
+
+    approval_position_id: user.approval_position_id,
+
+    approval_position: user.approval_position,
+  };
+};
+
+// GET ALL USERS
+
+const getUsers = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+                SELECT
+                    user_id,
+                    role_id,
+                    user_name,
+                    phone_number,
+                    email_id,
+                    employee_code,
+                    is_active,
+                    approval_position_id,
+                    approval_position
+
+                FROM user_table
+
+                ORDER BY user_name ASC
+                `,
+    );
+
+    const users = result.rows.map(formatUser);
+
+    return res.status(200).json({
+      users,
+    });
+  } catch (error) {
+    console.error("Admin get users error:", error);
+
+    return res.status(500).json({
+      message: "Unable to retrieve users",
+
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+};
+
 // CREATE USER
-// ADMIN ONLY
-// ============================================================
 
 const createUser = async (req, res) => {
+  const client = await pool.connect();
 
-    try {
+  try {
+    const {
+      user_id,
+      role_id,
+      user_name,
+      phone_number,
+      email_id,
 
-        const {
-            employee_code,
-            name,
-            email,
-            role
-        } = req.body;
+      // Frontend compatibility
+      name,
+      email,
+      role,
+    } = req.body;
 
+    // RESOLVE VALUES
 
-        // ----------------------------------------------------
-        // VALIDATION
-        // ----------------------------------------------------
+    const finalRoleId = getRoleId(
+      role_id !== undefined && role_id !== null ? role_id : role,
+    );
 
-        if (
-            !employee_code ||
-            !name ||
-            !email ||
-            !role
-        ) {
+    const finalUserName = normalizeName(
+      user_name !== undefined && user_name !== null ? user_name : name,
+    );
 
-            return res.status(400).json({
-                message:
-                    "Employee code, name, email and role are required"
-            });
+    const finalEmail = normalizeEmail(
+      email_id !== undefined && email_id !== null ? email_id : email,
+    );
 
-        }
+    const finalPhone = normalizePhone(phone_number);
 
+    // VALIDATION
 
-        // ----------------------------------------------------
-        // NORMALIZE VALUES
-        // ----------------------------------------------------
+    if (!ALLOWED_ROLE_IDS.includes(finalRoleId)) {
+      return res.status(400).json({
+        message: "Role must be ADMIN, EMPLOYEE, or REVIEWER",
+      });
+    }
 
-        const normalizedEmployeeCode =
-            employee_code.trim();
+    if (!finalUserName) {
+      return res.status(400).json({
+        message: "User name is required",
+      });
+    }
 
-        const normalizedName =
-            name.trim();
+    if (!finalEmail) {
+      return res.status(400).json({
+        message: "Email is required",
+      });
+    }
 
-        const normalizedEmail =
-            email
-                .trim()
-                .toLowerCase();
+    // START TRANSACTION
 
-        const normalizedRole =
-            role
-                .trim()
-                .toUpperCase();
+    await client.query("BEGIN");
 
+    // CHECK DUPLICATE EMAIL
 
-        if (!normalizedRole) {
+    const existingEmail = await client.query(
+      `
+                SELECT user_id
 
-            return res.status(400).json({
-                message:
-                    "Role cannot be empty"
-            });
+                FROM user_table
 
-        }
+                WHERE LOWER(email_id) = $1
 
-
-        // ----------------------------------------------------
-        // APPROVAL POSITION
-        //
-        // EMPLOYEE cannot approve anything.
-        //
-        // EMPLOYEE -> NULL
-        //
-        // Any other role -> same role
-        // ----------------------------------------------------
-
-        const approvalPosition =
-            normalizedRole === "EMPLOYEE"
-                ? null
-                : normalizedRole;
-
-
-        // ----------------------------------------------------
-        // CHECK EXISTING EMAIL
-        // ----------------------------------------------------
-
-        const existingEmail =
-            await pool.query(
-                `
-                SELECT id
-                FROM users
-                WHERE LOWER(email) = $1
+                LIMIT 1
                 `,
-                [
-                    normalizedEmail
-                ]
-            );
+      [finalEmail],
+    );
 
+    if (existingEmail.rows.length > 0) {
+      await client.query("ROLLBACK");
 
-        if (
-            existingEmail.rows.length > 0
-        ) {
+      return res.status(409).json({
+        message: "A user with this email already exists",
+      });
+    }
 
-            return res.status(409).json({
-                message:
-                    "A user with this email already exists"
-            });
+    // GENERATE USER ID
+    //
+    // Normally user_id should be generated by PostgreSQL.
+    //
+    // The fallback below is retained for compatibility
+    // with the existing table if no sequence/default exists.
 
-        }
+    let finalUserId = null;
 
+    if (
+      user_id !== undefined &&
+      user_id !== null &&
+      String(user_id).trim() !== ""
+    ) {
+      finalUserId = Number(user_id);
 
-        // ----------------------------------------------------
-        // CHECK EXISTING EMPLOYEE CODE
-        // ----------------------------------------------------
+      if (!Number.isInteger(finalUserId) || finalUserId <= 0) {
+        await client.query("ROLLBACK");
 
-        const existingEmployeeCode =
-            await pool.query(
-                `
-                SELECT id
-                FROM users
-                WHERE employee_code = $1
-                `,
-                [
-                    normalizedEmployeeCode
-                ]
-            );
+        return res.status(400).json({
+          message: "Invalid user ID",
+        });
+      }
 
+      const existingId = await client.query(
+        `
+                    SELECT user_id
 
-        if (
-            existingEmployeeCode.rows.length > 0
-        ) {
+                    FROM user_table
 
-            return res.status(409).json({
-                message:
-                    "A user with this employee code already exists"
-            });
+                    WHERE user_id = $1
+                    `,
+        [finalUserId],
+      );
 
-        }
+      if (existingId.rows.length > 0) {
+        await client.query("ROLLBACK");
 
+        return res.status(409).json({
+          message: "A user with this user ID already exists",
+        });
+      }
+    } else {
+      const nextIdResult = await client.query(
+        `
+                    SELECT
+                        COALESCE(
+                            MAX(user_id),
+                            0
+                        ) + 1 AS next_user_id
 
-        // ----------------------------------------------------
-        // GENERATE TEMPORARY PASSWORD
-        // ----------------------------------------------------
+                    FROM user_table
+                    `,
+      );
 
-        const temporaryPassword =
-            crypto
-                .randomBytes(9)
-                .toString("base64url");
+      finalUserId = Number(nextIdResult.rows[0].next_user_id);
+    }
 
+    // GENERATE EMPLOYEE CODE
 
-        // ----------------------------------------------------
-        // HASH PASSWORD
-        // ----------------------------------------------------
+    const employeeCode = await generateEmployeeCode(client, finalRoleId);
 
-        const passwordHash =
-            await bcrypt.hash(
-                temporaryPassword,
-                10
-            );
+    // APPROVAL POSITION
 
+    let approvalPositionId = null;
 
-        // ----------------------------------------------------
-        // INSERT USER
-        // ----------------------------------------------------
+    let approvalPosition = null;
 
-        const result =
-            await pool.query(
-                `
-                INSERT INTO users (
-                    employee_code,
-                    name,
-                    email,
-                    role,
-                    approval_position,
+    if (finalRoleId === 3) {
+      const reviewerPosition = await getReviewerApprovalPosition(client);
+
+      if (!reviewerPosition) {
+        await client.query("ROLLBACK");
+
+        return res.status(400).json({
+          message:
+            "REVIEWER approval position is not configured in the approval hierarchy",
+        });
+      }
+
+      approvalPositionId = reviewerPosition.id;
+
+      approvalPosition = "REVIEWER";
+    }
+
+    // GENERATE TEMPORARY PASSWORD
+
+    const temporaryPassword = crypto.randomBytes(9).toString("base64url");
+
+    const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+
+    // INSERT USER
+
+    const result = await client.query(
+      `
+                INSERT INTO user_table
+                (
+                    user_id,
+                    role_id,
+                    user_name,
+                    phone_number,
+                    email_id,
                     password_hash,
-                    is_active
+                    employee_code,
+                    is_active,
+                    approval_position_id,
+                    approval_position
                 )
-                VALUES (
+
+                VALUES
+                (
                     $1,
                     $2,
                     $3,
                     $4,
                     $5,
                     $6,
-                    TRUE
+                    $7,
+                    TRUE,
+                    $8,
+                    $9
                 )
+
                 RETURNING
-                    id,
+                    user_id,
+                    role_id,
+                    user_name,
+                    phone_number,
+                    email_id,
                     employee_code,
-                    name,
-                    email,
-                    role,
-                    approval_position,
-                    created_at,
-                    is_active
+                    is_active,
+                    approval_position_id,
+                    approval_position
                 `,
-                [
-                    normalizedEmployeeCode,
-                    normalizedName,
-                    normalizedEmail,
-                    normalizedRole,
-                    approvalPosition,
-                    passwordHash
-                ]
-            );
+      [
+        finalUserId,
+        finalRoleId,
+        finalUserName,
+        finalPhone,
+        finalEmail,
+        passwordHash,
+        employeeCode,
+        approvalPositionId,
+        approvalPosition,
+      ],
+    );
 
+    // COMMIT
 
-        return res.status(201).json({
+    await client.query("COMMIT");
 
-            message:
-                "User created successfully",
+    const createdUser = result.rows[0];
 
-            user:
-                result.rows[0],
+    return res.status(201).json({
+      message: "User created successfully",
 
-            temporaryPassword
+      user: formatUser(createdUser),
 
-        });
-
-    } catch (error) {
-
-        console.error(
-            "Admin create user error:",
-            error
-        );
-
-        return res.status(500).json({
-            message:
-                "Unable to create user"
-        });
-
+      // Temporary password is returned
+      // because the existing frontend/backend
+      // flow expects it.
+      temporaryPassword,
+    });
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.error("Admin create user rollback error:", rollbackError);
     }
 
+    console.error("Admin create user error:", error);
+
+    if (error.code === "23505") {
+      return res.status(409).json({
+        message: "User ID, email, or employee code already exists",
+      });
+    }
+
+    return res.status(500).json({
+      message: "Unable to create user",
+
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  } finally {
+    client.release();
+  }
 };
 
-
-// ============================================================
 // UPDATE USER
-// ADMIN ONLY
-// ============================================================
 
 const updateUser = async (req, res) => {
+  const client = await pool.connect();
 
-    try {
+  try {
+    const userId = Number(req.params.id);
 
-        const userId =
-            Number(req.params.id);
+    // VALIDATE USER ID
 
-
-        // ----------------------------------------------------
-        // VALIDATE ID
-        // ----------------------------------------------------
-
-        if (
-            !Number.isInteger(userId) ||
-            userId <= 0
-        ) {
-
-            return res.status(400).json({
-                message:
-                    "Invalid user ID"
-            });
-
-        }
-
-
-        const {
-            employee_code,
-            name,
-            email,
-            role
-        } = req.body;
-
-
-        // ----------------------------------------------------
-        // VALIDATION
-        // ----------------------------------------------------
-
-        if (
-            !employee_code ||
-            !name ||
-            !email ||
-            !role
-        ) {
-
-            return res.status(400).json({
-                message:
-                    "Employee code, name, email and role are required"
-            });
-
-        }
-
-
-        // ----------------------------------------------------
-        // NORMALIZE VALUES
-        // ----------------------------------------------------
-
-        const normalizedEmployeeCode =
-            employee_code.trim();
-
-        const normalizedName =
-            name.trim();
-
-        const normalizedEmail =
-            email
-                .trim()
-                .toLowerCase();
-
-        const normalizedRole =
-            role
-                .trim()
-                .toUpperCase();
-
-
-        if (!normalizedRole) {
-
-            return res.status(400).json({
-                message:
-                    "Role cannot be empty"
-            });
-
-        }
-
-
-        // ----------------------------------------------------
-        // APPROVAL POSITION
-        // ----------------------------------------------------
-
-        const approvalPosition =
-            normalizedRole === "EMPLOYEE"
-                ? null
-                : normalizedRole;
-
-
-        // ----------------------------------------------------
-        // CHECK USER EXISTS
-        // ----------------------------------------------------
-
-        const existingUser =
-            await pool.query(
-                `
-                SELECT
-                    id,
-                    role
-                FROM users
-                WHERE id = $1
-                `,
-                [
-                    userId
-                ]
-            );
-
-
-        if (
-            existingUser.rows.length === 0
-        ) {
-
-            return res.status(404).json({
-                message:
-                    "User not found"
-            });
-
-        }
-
-
-        // ----------------------------------------------------
-        // CHECK EMAIL
-        // ----------------------------------------------------
-
-        const existingEmail =
-            await pool.query(
-                `
-                SELECT id
-                FROM users
-                WHERE LOWER(email) = $1
-                AND id <> $2
-                `,
-                [
-                    normalizedEmail,
-                    userId
-                ]
-            );
-
-
-        if (
-            existingEmail.rows.length > 0
-        ) {
-
-            return res.status(409).json({
-                message:
-                    "A user with this email already exists"
-            });
-
-        }
-
-
-        // ----------------------------------------------------
-        // CHECK EMPLOYEE CODE
-        // ----------------------------------------------------
-
-        const existingEmployeeCode =
-            await pool.query(
-                `
-                SELECT id
-                FROM users
-                WHERE employee_code = $1
-                AND id <> $2
-                `,
-                [
-                    normalizedEmployeeCode,
-                    userId
-                ]
-            );
-
-
-        if (
-            existingEmployeeCode.rows.length > 0
-        ) {
-
-            return res.status(409).json({
-                message:
-                    "A user with this employee code already exists"
-            });
-
-        }
-
-
-        // ----------------------------------------------------
-        // PREVENT CHANGING ADMIN ROLE
-        // ----------------------------------------------------
-
-        const currentRole =
-            existingUser.rows[0].role;
-
-
-        if (
-            String(currentRole).toUpperCase() === "ADMIN" &&
-            normalizedRole !== "ADMIN"
-        ) {
-
-            return res.status(403).json({
-                message:
-                    "The ADMIN role cannot be changed"
-            });
-
-        }
-
-
-        // ----------------------------------------------------
-        // UPDATE USER
-        // ----------------------------------------------------
-
-        const result =
-            await pool.query(
-                `
-                UPDATE users
-                SET
-                    employee_code = $1,
-                    name = $2,
-                    email = $3,
-                    role = $4,
-                    approval_position = $5
-                WHERE id = $6
-                RETURNING
-                    id,
-                    employee_code,
-                    name,
-                    email,
-                    role,
-                    approval_position,
-                    created_at,
-                    is_active
-                `,
-                [
-                    normalizedEmployeeCode,
-                    normalizedName,
-                    normalizedEmail,
-                    normalizedRole,
-                    approvalPosition,
-                    userId
-                ]
-            );
-
-
-        return res.status(200).json({
-
-            message:
-                "User successfully updated",
-
-            user:
-                result.rows[0]
-
-        });
-
-    } catch (error) {
-
-        console.error(
-            "Admin update user error:",
-            error
-        );
-
-        return res.status(500).json({
-            message:
-                "Unable to update user"
-        });
-
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({
+        message: "Invalid user ID",
+      });
     }
 
+    const {
+      role_id,
+      user_name,
+      phone_number,
+      email_id,
+
+      // Frontend compatibility
+      name,
+      email,
+      role,
+    } = req.body;
+
+    const finalRoleId = getRoleId(
+      role_id !== undefined && role_id !== null ? role_id : role,
+    );
+
+    const finalUserName = normalizeName(
+      user_name !== undefined && user_name !== null ? user_name : name,
+    );
+
+    const finalEmail = normalizeEmail(
+      email_id !== undefined && email_id !== null ? email_id : email,
+    );
+
+    // VALIDATION
+
+    if (!ALLOWED_ROLE_IDS.includes(finalRoleId)) {
+      return res.status(400).json({
+        message: "Role must be ADMIN, EMPLOYEE, or REVIEWER",
+      });
+    }
+
+    if (!finalUserName) {
+      return res.status(400).json({
+        message: "User name is required",
+      });
+    }
+
+    if (!finalEmail) {
+      return res.status(400).json({
+        message: "Email is required",
+      });
+    }
+
+    // START TRANSACTION
+
+    await client.query("BEGIN");
+
+    // GET CURRENT USER
+
+    const existing = await client.query(
+      `
+        SELECT
+          user_id,
+          role_id,
+          user_name,
+          phone_number,
+          email_id,
+          employee_code,
+          is_active
+
+        FROM user_table
+
+        WHERE user_id = $1
+
+        FOR UPDATE
+      `,
+      [userId],
+    );
+
+    if (existing.rows.length === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    const currentUser = existing.rows[0];
+
+    // KEEP EXISTING PHONE NUMBER
+    // when frontend does not send one
+
+    const finalPhone =
+      phone_number !== undefined && phone_number !== null
+        ? normalizePhone(phone_number)
+        : currentUser.phone_number;
+
+    // ADMIN ROLE PROTECTION
+
+    if (Number(currentUser.role_id) === 1 && finalRoleId !== 1) {
+      await client.query("ROLLBACK");
+
+      return res.status(403).json({
+        message: "The ADMIN account role cannot be changed",
+      });
+    }
+
+    // PREVENT CHANGING ANOTHER USER INTO ADMIN
+
+    if (Number(currentUser.role_id) !== 1 && finalRoleId === 1) {
+      await client.query("ROLLBACK");
+
+      return res.status(403).json({
+        message: "A non-ADMIN user cannot be changed to ADMIN",
+      });
+    }
+
+    // DUPLICATE EMAIL CHECK
+
+    const duplicateEmail = await client.query(
+      `
+        SELECT user_id
+
+        FROM user_table
+
+        WHERE LOWER(email_id) = $1
+          AND user_id <> $2
+
+        LIMIT 1
+      `,
+      [finalEmail, userId],
+    );
+
+    if (duplicateEmail.rows.length > 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(409).json({
+        message: "A user with this email already exists",
+      });
+    }
+
+    // EMPLOYEE CODE
+
+    let employeeCode = currentUser.employee_code;
+
+    if (Number(currentUser.role_id) !== finalRoleId) {
+      employeeCode = await generateEmployeeCode(
+        client,
+        finalRoleId,
+      );
+    }
+
+    // APPROVAL POSITION
+
+    let approvalPositionId = null;
+
+    let approvalPosition = null;
+
+    if (finalRoleId === 3) {
+      const reviewerPosition =
+        await getReviewerApprovalPosition(client);
+
+      if (!reviewerPosition) {
+        await client.query("ROLLBACK");
+
+        return res.status(400).json({
+          message:
+            "REVIEWER approval position is not configured in the approval hierarchy",
+        });
+      }
+
+      approvalPositionId = reviewerPosition.id;
+
+      approvalPosition = "REVIEWER";
+    }
+
+    // UPDATE USER
+
+    const result = await client.query(
+      `
+        UPDATE user_table
+
+        SET
+          role_id = $1,
+          user_name = $2,
+          phone_number = $3,
+          email_id = $4,
+          employee_code = $5,
+          approval_position_id = $6,
+          approval_position = $7
+
+        WHERE user_id = $8
+
+        RETURNING
+          user_id,
+          role_id,
+          user_name,
+          phone_number,
+          email_id,
+          employee_code,
+          is_active,
+          approval_position_id,
+          approval_position
+      `,
+      [
+        finalRoleId,
+        finalUserName,
+        finalPhone,
+        finalEmail,
+        employeeCode,
+        approvalPositionId,
+        approvalPosition,
+        userId,
+      ],
+    );
+
+    await client.query("COMMIT");
+
+    return res.status(200).json({
+      message: "User successfully updated",
+
+      user: formatUser(result.rows[0]),
+    });
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.error(
+        "Admin update user rollback error:",
+        rollbackError,
+      );
+    }
+
+    console.error(
+      "Admin update user error:",
+      error,
+    );
+
+    if (error.code === "23505") {
+      return res.status(409).json({
+        message: "Email or employee code already exists",
+      });
+    }
+
+    return res.status(500).json({
+      message: "Unable to update user",
+
+      error:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : undefined,
+    });
+  } finally {
+    client.release();
+  }
 };
-
-
-// ============================================================
 // DEACTIVATE USER
-// ADMIN ONLY
-// ============================================================
 
 const deactivateUser = async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
 
-    try {
-
-        const userId =
-            Number(req.params.id);
-
-
-        if (
-            !Number.isInteger(userId) ||
-            userId <= 0
-        ) {
-
-            return res.status(400).json({
-                message:
-                    "Invalid user ID"
-            });
-
-        }
-
-
-        const userResult =
-            await pool.query(
-                `
-                SELECT
-                    id,
-                    role,
-                    is_active
-                FROM users
-                WHERE id = $1
-                `,
-                [
-                    userId
-                ]
-            );
-
-
-        if (
-            userResult.rows.length === 0
-        ) {
-
-            return res.status(404).json({
-                message:
-                    "User not found"
-            });
-
-        }
-
-
-        const user =
-            userResult.rows[0];
-
-
-        if (
-            String(user.role).toUpperCase() === "ADMIN"
-        ) {
-
-            return res.status(403).json({
-                message:
-                    "The ADMIN account cannot be deactivated"
-            });
-
-        }
-
-
-        if (!user.is_active) {
-
-            return res.status(400).json({
-                message:
-                    "User is already inactive"
-            });
-
-        }
-
-
-        const result =
-            await pool.query(
-                `
-                UPDATE users
-                SET is_active = FALSE
-                WHERE id = $1
-                RETURNING
-                    id,
-                    employee_code,
-                    name,
-                    email,
-                    role,
-                    approval_position,
-                    created_at,
-                    is_active
-                `,
-                [
-                    userId
-                ]
-            );
-
-
-        return res.status(200).json({
-
-            message:
-                "User deactivated successfully",
-
-            user:
-                result.rows[0]
-
-        });
-
-    } catch (error) {
-
-        console.error(
-            "Admin deactivate user error:",
-            error
-        );
-
-        return res.status(500).json({
-            message:
-                "Unable to deactivate user"
-        });
-
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({
+        message: "Invalid user ID",
+      });
     }
 
+    // PREVENT SELF DEACTIVATION
+
+    if (req.user && Number(req.user.id) === userId) {
+      return res.status(403).json({
+        message: "You cannot deactivate your own account",
+      });
+    }
+
+    // ADMIN CANNOT BE DEACTIVATED
+
+    const result = await pool.query(
+      `
+                UPDATE user_table
+
+                SET
+                    is_active = FALSE
+
+                WHERE user_id = $1
+                  AND role_id <> 1
+
+                RETURNING
+                    user_id,
+                    role_id,
+                    user_name,
+                    phone_number,
+                    email_id,
+                    employee_code,
+                    is_active,
+                    approval_position_id,
+                    approval_position
+                `,
+      [userId],
+    );
+
+    if (result.rows.length === 0) {
+      const check = await pool.query(
+        `
+                    SELECT
+                        user_id,
+                        role_id
+
+                    FROM user_table
+
+                    WHERE user_id = $1
+                    `,
+        [userId],
+      );
+
+      if (check.rows.length === 0) {
+        return res.status(404).json({
+          message: "User not found",
+        });
+      }
+
+      return res.status(403).json({
+        message: "The ADMIN account cannot be deactivated",
+      });
+    }
+
+    return res.status(200).json({
+      message: "User deactivated successfully",
+
+      user: formatUser(result.rows[0]),
+    });
+  } catch (error) {
+    console.error("Admin deactivate user error:", error);
+
+    return res.status(500).json({
+      message: "Unable to deactivate user",
+
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
 };
 
-
-// ============================================================
 // REACTIVATE USER
-// ADMIN ONLY
-// ============================================================
 
 const reactivateUser = async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
 
-    try {
-
-        const userId =
-            Number(req.params.id);
-
-
-        if (
-            !Number.isInteger(userId) ||
-            userId <= 0
-        ) {
-
-            return res.status(400).json({
-                message:
-                    "Invalid user ID"
-            });
-
-        }
-
-
-        const userResult =
-            await pool.query(
-                `
-                SELECT
-                    id,
-                    is_active
-                FROM users
-                WHERE id = $1
-                `,
-                [
-                    userId
-                ]
-            );
-
-
-        if (
-            userResult.rows.length === 0
-        ) {
-
-            return res.status(404).json({
-                message:
-                    "User not found"
-            });
-
-        }
-
-
-        if (
-            userResult.rows[0].is_active
-        ) {
-
-            return res.status(400).json({
-                message:
-                    "User is already active"
-            });
-
-        }
-
-
-        const result =
-            await pool.query(
-                `
-                UPDATE users
-                SET is_active = TRUE
-                WHERE id = $1
-                RETURNING
-                    id,
-                    employee_code,
-                    name,
-                    email,
-                    role,
-                    approval_position,
-                    created_at,
-                    is_active
-                `,
-                [
-                    userId
-                ]
-            );
-
-
-        return res.status(200).json({
-
-            message:
-                "User reactivated successfully",
-
-            user:
-                result.rows[0]
-
-        });
-
-    } catch (error) {
-
-        console.error(
-            "Admin reactivate user error:",
-            error
-        );
-
-        return res.status(500).json({
-            message:
-                "Unable to reactivate user"
-        });
-
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({
+        message: "Invalid user ID",
+      });
     }
 
+    const result = await pool.query(
+      `
+                UPDATE user_table
+
+                SET
+                    is_active = TRUE
+
+                WHERE user_id = $1
+
+                RETURNING
+                    user_id,
+                    role_id,
+                    user_name,
+                    phone_number,
+                    email_id,
+                    employee_code,
+                    is_active,
+                    approval_position_id,
+                    approval_position
+                `,
+      [userId],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    return res.status(200).json({
+      message: "User reactivated successfully",
+
+      user: formatUser(result.rows[0]),
+    });
+  } catch (error) {
+    console.error("Admin reactivate user error:", error);
+
+    return res.status(500).json({
+      message: "Unable to reactivate user",
+
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
 };
 
-
-// ============================================================
-// PERMANENTLY DELETE USER
-// ADMIN ONLY
-// ============================================================
+// DELETE USER
 
 const deleteUser = async (req, res) => {
+  const client = await pool.connect();
 
-    try {
+  try {
+    const userId = Number(req.params.id);
 
-        const userId =
-            Number(req.params.id);
+    // VALIDATE USER ID
 
-
-        if (
-            !Number.isInteger(userId) ||
-            userId <= 0
-        ) {
-
-            return res.status(400).json({
-                message:
-                    "Invalid user ID"
-            });
-
-        }
-
-
-        const userResult =
-            await pool.query(
-                `
-                SELECT
-                    id,
-                    employee_code,
-                    name,
-                    email,
-                    role
-                FROM users
-                WHERE id = $1
-                `,
-                [
-                    userId
-                ]
-            );
-
-
-        if (
-            userResult.rows.length === 0
-        ) {
-
-            return res.status(404).json({
-                message:
-                    "User not found"
-            });
-
-        }
-
-
-        const user =
-            userResult.rows[0];
-
-
-        // ----------------------------------------------------
-        // NEVER DELETE ADMIN
-        // ----------------------------------------------------
-
-        if (
-            String(user.role).toUpperCase() === "ADMIN"
-        ) {
-
-            return res.status(403).json({
-                message:
-                    "The ADMIN account cannot be permanently deleted"
-            });
-
-        }
-
-
-        // ----------------------------------------------------
-        // PREVENT SELF DELETE
-        // ----------------------------------------------------
-
-        if (
-            req.user &&
-            Number(req.user.id) === userId
-        ) {
-
-            return res.status(403).json({
-                message:
-                    "You cannot permanently delete your own account"
-            });
-
-        }
-
-
-        // ----------------------------------------------------
-        // CHECK APPROVAL REQUEST REFERENCES
-        // ----------------------------------------------------
-
-        const requestReference =
-            await pool.query(
-                `
-                SELECT id
-                FROM approval_requests
-                WHERE employee_id = $1
-                LIMIT 1
-                `,
-                [
-                    userId
-                ]
-            );
-
-
-        if (
-            requestReference.rows.length > 0
-        ) {
-
-            return res.status(409).json({
-                message:
-                    "This user cannot be permanently deleted because they are associated with existing approval requests. Deactivate the user instead."
-            });
-
-        }
-
-
-        // ----------------------------------------------------
-        // CHECK APPROVAL HISTORY REFERENCES
-        // ----------------------------------------------------
-
-        const historyReference =
-            await pool.query(
-                `
-                SELECT id
-                FROM approval_history
-                WHERE approver_id = $1
-                LIMIT 1
-                `,
-                [
-                    userId
-                ]
-            );
-
-
-        if (
-            historyReference.rows.length > 0
-        ) {
-
-            return res.status(409).json({
-                message:
-                    "This user cannot be permanently deleted because they are associated with approval history. Deactivate the user instead."
-            });
-
-        }
-
-
-        // ----------------------------------------------------
-        // CHECK REQUEST ATTACHMENTS
-        // ----------------------------------------------------
-
-        const attachmentReference =
-            await pool.query(
-                `
-                SELECT id
-                FROM request_attachments
-                WHERE request_id IN (
-                    SELECT id
-                    FROM approval_requests
-                    WHERE employee_id = $1
-                )
-                LIMIT 1
-                `,
-                [
-                    userId
-                ]
-            );
-
-
-        if (
-            attachmentReference.rows.length > 0
-        ) {
-
-            return res.status(409).json({
-                message:
-                    "This user cannot be permanently deleted because their requests contain attachments. Deactivate the user instead."
-            });
-
-        }
-
-
-        // ----------------------------------------------------
-        // DELETE USER
-        // ----------------------------------------------------
-
-        await pool.query(
-            `
-            DELETE FROM users
-            WHERE id = $1
-            `,
-            [
-                userId
-            ]
-        );
-
-
-        return res.status(200).json({
-
-            message:
-                "User permanently deleted",
-
-            user: {
-
-                id:
-                    user.id,
-
-                employee_code:
-                    user.employee_code,
-
-                name:
-                    user.name,
-
-                email:
-                    user.email
-
-            }
-
-        });
-
-    } catch (error) {
-
-        console.error(
-            "Admin delete user error:",
-            error
-        );
-
-
-        if (
-            error.code === "23503"
-        ) {
-
-            return res.status(409).json({
-                message:
-                    "This user cannot be permanently deleted because other records depend on this user. Deactivate the user instead."
-            });
-
-        }
-
-
-        return res.status(500).json({
-            message:
-                "Unable to permanently delete user"
-        });
-
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({
+        message: "Invalid user ID",
+      });
     }
 
+    // GET USER
+
+    const userResult = await client.query(
+      `
+                SELECT
+                    user_id,
+                    role_id,
+                    user_name,
+                    phone_number,
+                    email_id,
+                    employee_code,
+                    is_active,
+                    approval_position_id,
+                    approval_position
+
+                FROM user_table
+
+                WHERE user_id = $1
+                `,
+      [userId],
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    // PREVENT SELF DELETE
+
+    if (req.user && Number(req.user.id) === userId) {
+      return res.status(403).json({
+        message: "You cannot permanently delete your own account",
+      });
+    }
+
+    // ADMIN CANNOT BE DELETED
+
+    if (Number(user.role_id) === 1) {
+      return res.status(403).json({
+        message: "The ADMIN account cannot be permanently deleted",
+      });
+    }
+
+    // CHECK APPROVAL REQUEST REFERENCES
+
+    const requestReference = await client.query(
+      `
+                SELECT id
+
+                FROM approval_requests
+
+                WHERE employee_id = $1
+
+                LIMIT 1
+                `,
+      [userId],
+    );
+
+    if (requestReference.rows.length > 0) {
+      return res.status(409).json({
+        message:
+          "This user cannot be permanently deleted because they are associated with existing approval requests. Remove or deactivate the user instead.",
+      });
+    }
+
+    // CHECK APPROVAL HISTORY REFERENCES
+
+    const historyReference = await client.query(
+      `
+                SELECT id
+
+                FROM approval_history
+
+                WHERE approver_id = $1
+
+                LIMIT 1
+                `,
+      [userId],
+    );
+
+    if (historyReference.rows.length > 0) {
+      return res.status(409).json({
+        message:
+          "This user cannot be permanently deleted because they are associated with approval history. Remove or deactivate the user instead.",
+      });
+    }
+
+    // CHECK REQUEST ATTACHMENT REFERENCES
+
+    const attachmentReference = await client.query(
+      `
+                SELECT id
+
+                FROM request_attachments
+
+                WHERE uploaded_by = $1
+
+                LIMIT 1
+                `,
+      [userId],
+    );
+
+    if (attachmentReference.rows.length > 0) {
+      return res.status(409).json({
+        message:
+          "This user cannot be permanently deleted because they are associated with request attachments. Remove or deactivate the user instead.",
+      });
+    }
+
+    // DELETE USER SESSIONS FIRST
+
+    await client
+      .query(
+        `
+            DELETE FROM user_sessions
+
+            WHERE user_id = $1
+            `,
+        [userId],
+      )
+      .catch(() => {
+        // Some database versions may not have user_id
+        // in user_sessions. Do not fail the user delete
+        // solely because this optional cleanup is unavailable.
+      });
+
+    // DELETE USER
+
+    await client.query(
+      `
+            DELETE FROM user_table
+
+            WHERE user_id = $1
+            `,
+      [userId],
+    );
+
+    return res.status(200).json({
+      message: "User deleted successfully",
+
+      deleted_user: formatUser(user),
+    });
+  } catch (error) {
+    console.error("Admin delete user error:", error);
+
+    if (error.code === "23503") {
+      return res.status(409).json({
+        message:
+          "This user cannot be deleted because other records still reference the account. Deactivate the user instead.",
+      });
+    }
+
+    return res.status(500).json({
+      message: "Unable to delete user",
+
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  } finally {
+    client.release();
+  }
 };
 
-
-// ============================================================
 // GET APPROVAL WORKFLOW HIERARCHY
-// ADMIN ONLY
-// ============================================================
-
-// ============================================================
-// GET APPROVAL WORKFLOW HIERARCHY
-// ADMIN ONLY
-// ============================================================
 
 const getHierarchy = async (req, res) => {
-
-    try {
-
-        const result =
-            await pool.query(
-                `
+  try {
+    const result = await pool.query(
+      `
                 SELECT
                     id,
                     approval_level,
                     role,
                     created_at,
                     updated_at
+
                 FROM approval_workflow_hierarchy
+
                 ORDER BY approval_level ASC
-                `
-            );
+                `,
+    );
 
+    return res.status(200).json({
+      hierarchy: result.rows,
+    });
+  } catch (error) {
+    console.error("Admin get hierarchy error:", error);
 
-        return res.status(200).json({
-
-            hierarchy:
-                result.rows
-
-        });
-
-    } catch (error) {
-
-        console.error(
-            "Admin get hierarchy error:",
-            error
-        );
-
-
-        return res.status(500).json({
-
-            message:
-                "Unable to retrieve approval hierarchy"
-
-        });
-
-    }
-
+    return res.status(500).json({
+      message: "Unable to retrieve approval hierarchy",
+    });
+  }
 };
 
-
-// ============================================================
 // ADD APPROVAL WORKFLOW LEVEL
-// ADMIN ONLY
-// ============================================================
 
 const addHierarchyLevel = async (req, res) => {
+  const client = await pool.connect();
 
-    const client = await pool.connect();
+  try {
+    const { approval_level, role } = req.body;
 
-    try {
+    const newLevel = Number(approval_level);
 
-        const {
-            approval_level,
-            role
-        } = req.body;
+    // VALIDATE LEVEL
 
-        const level = Number(approval_level);
+    if (!Number.isInteger(newLevel) || newLevel <= 0) {
+      return res.status(400).json({
+        message: "Approval level must be a positive integer",
+      });
+    }
 
-        // ----------------------------------------------------
-        // VALIDATE LEVEL
-        // ----------------------------------------------------
+    // VALIDATE ROLE
 
-        if (
-            !Number.isInteger(level) ||
-            level <= 0
-        ) {
+    if (typeof role !== "string" || !role.trim()) {
+      return res.status(400).json({
+        message: "Role is required",
+      });
+    }
 
-            return res.status(400).json({
-                message: "Approval level must be a positive integer"
-            });
+    const normalizedRole = role.trim().toUpperCase();
 
-        }
+    // EMPLOYEE IS NOT AN APPROVAL POSITION
 
-        // ----------------------------------------------------
-        // VALIDATE ROLE
-        // ----------------------------------------------------
+    if (normalizedRole === "EMPLOYEE") {
+      return res.status(400).json({
+        message: "EMPLOYEE cannot be an approval position",
+      });
+    }
 
-        if (
-            typeof role !== "string" ||
-            !role.trim()
-        ) {
+    // ADMIN IS NOT AN APPROVAL POSITION
 
-            return res.status(400).json({
-                message: "Role is required"
-            });
+    if (normalizedRole === "ADMIN") {
+      return res.status(400).json({
+        message: "ADMIN cannot be an approval position",
+      });
+    }
 
-        }
+    await client.query("BEGIN");
 
-        const normalizedRole =
-            role.trim().toUpperCase();
+    // GET CURRENT HIERARCHY
 
-        // ----------------------------------------------------
-        // EMPLOYEE IS NOT AN APPROVAL HIERARCHY LEVEL
-        // ----------------------------------------------------
-
-        if (normalizedRole === "EMPLOYEE") {
-
-            return res.status(400).json({
-                message:
-                    "EMPLOYEE cannot be an approval position"
-            });
-
-        }
-
-        await client.query("BEGIN");
-
-        // ----------------------------------------------------
-        // LOCK HIERARCHY
-        // ----------------------------------------------------
-
-        const hierarchyResult =
-            await client.query(`
+    const hierarchyResult = await client.query(
+      `
                 SELECT
                     id,
                     approval_level,
                     role
+
                 FROM approval_workflow_hierarchy
+
                 ORDER BY approval_level ASC
+
                 FOR UPDATE
-            `);
+                `,
+    );
 
-        const hierarchy =
-            hierarchyResult.rows;
+    const hierarchy = hierarchyResult.rows;
 
-        const currentCount =
-            hierarchy.length;
+    const hierarchyCount = hierarchy.length;
 
-        const nextAvailableLevel =
-            currentCount + 1;
+    // DUPLICATE ROLE
 
-        // ----------------------------------------------------
-        // NO GAPS
-        // ----------------------------------------------------
+    const duplicateRole = hierarchy.find(
+      (item) => String(item.role).trim().toUpperCase() === normalizedRole,
+    );
 
-        if (level > nextAvailableLevel) {
+    if (duplicateRole) {
+      await client.query("ROLLBACK");
 
-            await client.query("ROLLBACK");
+      return res.status(409).json({
+        message: "This role already exists in the approval hierarchy",
+      });
+    }
 
-            return res.status(400).json({
-                message:
-                    `Approval level cannot be greater than ${nextAvailableLevel}`
-            });
+    // NEW LEVEL CANNOT SKIP MORE THAN ONE LEVEL
 
-        }
+    if (newLevel > hierarchyCount + 1) {
+      await client.query("ROLLBACK");
 
-        // ----------------------------------------------------
-        // CHECK DUPLICATE ROLE
-        // ----------------------------------------------------
+      return res.status(400).json({
+        message: `Approval level cannot be greater than ${hierarchyCount + 1}`,
+      });
+    }
 
-        const duplicateRole =
-            hierarchy.find(
-                item =>
-                    String(item.role).trim().toUpperCase() ===
-                    normalizedRole
-            );
+    // SHIFT EXISTING LEVELS
 
-        if (duplicateRole) {
+    for (let index = hierarchy.length - 1; index >= 0; index--) {
+      const item = hierarchy[index];
 
-            await client.query("ROLLBACK");
+      const currentLevel = Number(item.approval_level);
 
-            return res.status(409).json({
-                message:
-                    "This role already exists in the approval hierarchy"
-            });
-
-        }
-
-        // ----------------------------------------------------
-        // SHIFT EXISTING LEVELS
-        //
-        // IMPORTANT:
-        // Update from highest level DOWNWARD.
-        //
-        // Example:
-        //
-        // 1 HR
-        // 2 MANAGER
-        // 3 EMPLOYEE
-        //
-        // Insert at 2:
-        //
-        // 3 -> 4
-        // 2 -> 3
-        //
-        // Then insert new level 2.
-        //
-        // This avoids duplicate unique-key values.
-        // ----------------------------------------------------
-
-        for (
-            let index = hierarchy.length - 1;
-            index >= 0;
-            index--
-        ) {
-
-            const item =
-                hierarchy[index];
-
-            const currentLevel =
-                Number(item.approval_level);
-
-            if (currentLevel >= level) {
-
-                await client.query(
-                    `
+      if (currentLevel >= newLevel) {
+        await client.query(
+          `
                     UPDATE approval_workflow_hierarchy
+
                     SET
                         approval_level = $1,
                         updated_at = CURRENT_TIMESTAMP
+
                     WHERE id = $2
                     `,
-                    [
-                        currentLevel + 1,
-                        item.id
-                    ]
-                );
+          [currentLevel + 1, item.id],
+        );
+      }
+    }
 
-            }
+    // INSERT NEW LEVEL
 
-        }
-
-        // ----------------------------------------------------
-        // INSERT NEW LEVEL
-        // ----------------------------------------------------
-
-        const inserted =
-            await client.query(
-                `
-                INSERT INTO approval_workflow_hierarchy (
+    const inserted = await client.query(
+      `
+                INSERT INTO approval_workflow_hierarchy
+                (
                     approval_level,
-                    role
+                    role,
+                    created_at,
+                    updated_at
                 )
-                VALUES (
+
+                VALUES
+                (
                     $1,
-                    $2
+                    $2,
+                    CURRENT_TIMESTAMP,
+                    CURRENT_TIMESTAMP
                 )
+
                 RETURNING
                     id,
                     approval_level,
@@ -1318,289 +1287,200 @@ const addHierarchyLevel = async (req, res) => {
                     created_at,
                     updated_at
                 `,
-                [
-                    level,
-                    normalizedRole
-                ]
-            );
+      [newLevel, normalizedRole],
+    );
 
-        await client.query("COMMIT");
+    await client.query("COMMIT");
 
-        // ----------------------------------------------------
-        // RETURN COMPLETE HIERARCHY
-        // ----------------------------------------------------
+    // FINAL HIERARCHY
 
-        const finalHierarchy =
-            await pool.query(`
+    const finalHierarchy = await pool.query(
+      `
                 SELECT
                     id,
                     approval_level,
                     role,
                     created_at,
                     updated_at
+
                 FROM approval_workflow_hierarchy
+
                 ORDER BY approval_level ASC
-            `);
+                `,
+    );
 
-        return res.status(201).json({
+    return res.status(201).json({
+      message: "Approval hierarchy level added successfully",
 
-            message:
-                "Approval hierarchy level added successfully",
+      hierarchy: finalHierarchy.rows,
 
-            hierarchy:
-                finalHierarchy.rows,
-
-            added:
-                inserted.rows[0]
-
-        });
-
-    } catch (error) {
-
-        try {
-            await client.query("ROLLBACK");
-        } catch (rollbackError) {
-            console.error(
-                "Admin add hierarchy rollback error:",
-                rollbackError
-            );
-        }
-
-        console.error(
-            "Admin add hierarchy level error:",
-            error
-        );
-
-        if (error.code === "23505") {
-
-            return res.status(409).json({
-                message:
-                    "Approval level or role already exists"
-            });
-
-        }
-
-        if (error.code === "23514") {
-
-            return res.status(400).json({
-                message:
-                    "Approval level must always be a positive integer"
-            });
-
-        }
-
-        return res.status(500).json({
-            message:
-                "Unable to add approval hierarchy level"
-        });
-
-    } finally {
-
-        client.release();
-
+      added: inserted.rows[0],
+    });
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.error("Admin add hierarchy rollback error:", rollbackError);
     }
 
+    console.error("Admin add hierarchy level error:", error);
+
+    if (error.code === "23505") {
+      return res.status(409).json({
+        message: "Approval level or role already exists",
+      });
+    }
+
+    if (error.code === "23514") {
+      return res.status(400).json({
+        message: "Approval level must always be a positive integer",
+      });
+    }
+
+    return res.status(500).json({
+      message: "Unable to add approval hierarchy level",
+    });
+  } finally {
+    client.release();
+  }
 };
 
-
-// ============================================================
 // UPDATE APPROVAL WORKFLOW LEVEL
-// ADMIN ONLY
-// ============================================================
 
 const updateHierarchyLevel = async (req, res) => {
+  const client = await pool.connect();
 
-    const client = await pool.connect();
+  try {
+    const hierarchyId = Number(req.params.id);
 
-    try {
+    // VALIDATE ID
 
-        const hierarchyId =
-            Number(req.params.id);
+    if (!Number.isInteger(hierarchyId) || hierarchyId <= 0) {
+      return res.status(400).json({
+        message: "Invalid hierarchy ID",
+      });
+    }
 
-        // ----------------------------------------------------
-        // VALIDATE ID
-        // ----------------------------------------------------
+    const { approval_level, role } = req.body;
 
-        if (
-            !Number.isInteger(hierarchyId) ||
-            hierarchyId <= 0
-        ) {
+    const newLevel = Number(approval_level);
 
-            return res.status(400).json({
-                message: "Invalid hierarchy ID"
-            });
+    // VALIDATE LEVEL
 
-        }
+    if (!Number.isInteger(newLevel) || newLevel <= 0) {
+      return res.status(400).json({
+        message: "Approval level must be a positive integer",
+      });
+    }
 
-        const {
-            approval_level,
-            role
-        } = req.body;
+    // VALIDATE ROLE
 
-        const newLevel =
-            Number(approval_level);
+    if (typeof role !== "string" || !role.trim()) {
+      return res.status(400).json({
+        message: "Role is required",
+      });
+    }
 
-        // ----------------------------------------------------
-        // VALIDATE LEVEL
-        // ----------------------------------------------------
+    const normalizedRole = role.trim().toUpperCase();
 
-        if (
-            !Number.isInteger(newLevel) ||
-            newLevel <= 0
-        ) {
+    // EMPLOYEE CANNOT APPROVE
 
-            return res.status(400).json({
-                message:
-                    "Approval level must be a positive integer"
-            });
+    if (normalizedRole === "EMPLOYEE") {
+      return res.status(400).json({
+        message: "EMPLOYEE cannot be an approval position",
+      });
+    }
 
-        }
+    // ADMIN CANNOT APPROVE
 
-        // ----------------------------------------------------
-        // VALIDATE ROLE
-        // ----------------------------------------------------
+    if (normalizedRole === "ADMIN") {
+      return res.status(400).json({
+        message: "ADMIN cannot be an approval position",
+      });
+    }
 
-        if (
-            typeof role !== "string" ||
-            !role.trim()
-        ) {
+    await client.query("BEGIN");
 
-            return res.status(400).json({
-                message: "Role is required"
-            });
+    // LOCK HIERARCHY
 
-        }
-
-        const normalizedRole =
-            role.trim().toUpperCase();
-
-        // ----------------------------------------------------
-        // EMPLOYEE CANNOT BE AN APPROVAL LEVEL
-        // ----------------------------------------------------
-
-        if (
-            normalizedRole === "EMPLOYEE"
-        ) {
-
-            return res.status(400).json({
-                message:
-                    "EMPLOYEE cannot be an approval position"
-            });
-
-        }
-
-        await client.query("BEGIN");
-
-        // ----------------------------------------------------
-        // LOCK COMPLETE HIERARCHY
-        // ----------------------------------------------------
-
-        const hierarchyResult =
-            await client.query(`
+    const hierarchyResult = await client.query(
+      `
                 SELECT
                     id,
                     approval_level,
                     role,
                     created_at,
                     updated_at
+
                 FROM approval_workflow_hierarchy
+
                 ORDER BY approval_level ASC
+
                 FOR UPDATE
-            `);
+                `,
+    );
 
-        const hierarchy =
-            hierarchyResult.rows;
+    const hierarchy = hierarchyResult.rows;
 
-        // ----------------------------------------------------
-        // FIND CURRENT LEVEL
-        // ----------------------------------------------------
+    // FIND CURRENT RECORD
 
-        const currentIndex =
-            hierarchy.findIndex(
-                item =>
-                    Number(item.id) === hierarchyId
-            );
+    const currentIndex = hierarchy.findIndex(
+      (item) => Number(item.id) === hierarchyId,
+    );
 
-        if (
-            currentIndex === -1
-        ) {
+    if (currentIndex === -1) {
+      await client.query("ROLLBACK");
 
-            await client.query("ROLLBACK");
+      return res.status(404).json({
+        message: "Approval hierarchy level not found",
+      });
+    }
 
-            return res.status(404).json({
-                message:
-                    "Approval hierarchy level not found"
-            });
+    const current = hierarchy[currentIndex];
 
-        }
+    const currentLevel = Number(current.approval_level);
 
-        const current =
-            hierarchy[currentIndex];
+    const hierarchyCount = hierarchy.length;
 
-        const currentLevel =
-            Number(current.approval_level);
+    // LEVEL CANNOT EXCEED HIERARCHY SIZE
 
-        const hierarchyCount =
-            hierarchy.length;
+    if (newLevel > hierarchyCount) {
+      await client.query("ROLLBACK");
 
-        // ----------------------------------------------------
-        // EDIT CANNOT CREATE A NEW LEVEL
-        // ----------------------------------------------------
+      return res.status(400).json({
+        message: `Approval level cannot be greater than ${hierarchyCount}`,
+      });
+    }
 
-        if (
-            newLevel > hierarchyCount
-        ) {
+    // DUPLICATE ROLE
 
-            await client.query("ROLLBACK");
+    const duplicateRole = hierarchy.find(
+      (item) =>
+        Number(item.id) !== hierarchyId &&
+        String(item.role).trim().toUpperCase() === normalizedRole,
+    );
 
-            return res.status(400).json({
-                message:
-                    `Approval level cannot be greater than ${hierarchyCount}`
-            });
+    if (duplicateRole) {
+      await client.query("ROLLBACK");
 
-        }
+      return res.status(409).json({
+        message: "This role already exists in the approval hierarchy",
+      });
+    }
 
-        // ----------------------------------------------------
-        // CHECK DUPLICATE ROLE
-        // ----------------------------------------------------
+    // SAME LEVEL
 
-        const duplicateRole =
-            hierarchy.find(
-                item =>
-                    Number(item.id) !== hierarchyId &&
-                    String(item.role).trim().toUpperCase() ===
-                        normalizedRole
-            );
-
-        if (
-            duplicateRole
-        ) {
-
-            await client.query("ROLLBACK");
-
-            return res.status(409).json({
-                message:
-                    "This role already exists in the approval hierarchy"
-            });
-
-        }
-
-        // ====================================================
-        // SAME LEVEL
-        // ====================================================
-
-        if (
-            currentLevel === newLevel
-        ) {
-
-            const updated =
-                await client.query(
-                    `
+    if (currentLevel === newLevel) {
+      const updated = await client.query(
+        `
                     UPDATE approval_workflow_hierarchy
+
                     SET
                         role = $1,
                         updated_at = CURRENT_TIMESTAMP
+
                     WHERE id = $2
+
                     RETURNING
                         id,
                         approval_level,
@@ -1608,217 +1488,142 @@ const updateHierarchyLevel = async (req, res) => {
                         created_at,
                         updated_at
                     `,
-                    [
-                        normalizedRole,
-                        hierarchyId
-                    ]
-                );
+        [normalizedRole, hierarchyId],
+      );
 
-            await client.query("COMMIT");
+      await client.query("COMMIT");
 
-            const finalHierarchy =
-                await pool.query(`
+      const finalHierarchy = await pool.query(
+        `
                     SELECT
                         id,
                         approval_level,
                         role,
                         created_at,
                         updated_at
+
                     FROM approval_workflow_hierarchy
+
                     ORDER BY approval_level ASC
-                `);
+                    `,
+      );
 
-            return res.status(200).json({
+      return res.status(200).json({
+        message: "Approval hierarchy level updated successfully",
 
-                message:
-                    "Approval hierarchy level updated successfully",
+        hierarchy: finalHierarchy.rows,
 
-                hierarchy:
-                    finalHierarchy.rows,
+        updated: updated.rows[0],
+      });
+    }
 
-                updated:
-                    updated.rows[0]
+    // TEMPORARILY MOVE SELECTED RECORD
 
-            });
+    const temporaryLevel = hierarchyCount + 1;
 
-        }
-
-        // ====================================================
-        // IMPORTANT:
-        //
-        // Temporarily move the edited row to a POSITIVE level
-        // outside the normal hierarchy.
-        //
-        // Example with 3 levels:
-        //
-        // 1 MANAGER
-        // 2 ASSISTANT MANAGER
-        // 3 HR
-        //
-        // MANAGER temporarily becomes level 4.
-        //
-        // We NEVER use -1 or 0.
-        // ====================================================
-
-        const temporaryLevel =
-            hierarchyCount + 1;
-
-        await client.query(
-            `
+    await client.query(
+      `
             UPDATE approval_workflow_hierarchy
+
             SET
                 approval_level = $1,
                 updated_at = CURRENT_TIMESTAMP
+
             WHERE id = $2
             `,
-            [
-                temporaryLevel,
-                hierarchyId
-            ]
+      [temporaryLevel, hierarchyId],
+    );
+
+    // MOVING DOWN
+    //
+    // Example:
+    //
+    // 1 Reviewer
+    // 2 Manager
+    // 3 GM
+    //
+    // Move Reviewer from 1 -> 3
+    //
+    // Manager becomes 1
+    // GM becomes 2
+    // Reviewer becomes 3
+
+    if (newLevel > currentLevel) {
+      for (let level = currentLevel + 1; level <= newLevel; level++) {
+        const item = hierarchy.find(
+          (row) => Number(row.approval_level) === level,
         );
 
-        // ====================================================
-        // MOVE DOWN
-        //
-        // Example:
-        //
-        // 1 MANAGER
-        // 2 ASSISTANT MANAGER
-        // 3 HR
-        //
-        // MANAGER 1 → 2
-        //
-        // MANAGER is temporarily at 4.
-        //
-        // Then:
-        //
-        // ASSISTANT MANAGER 2 → 1
-        //
-        // Finally:
-        //
-        // MANAGER 4 → 2
-        // ====================================================
+        if (!item || Number(item.id) === hierarchyId) {
+          continue;
+        }
 
-        if (
-            newLevel > currentLevel
-        ) {
-
-            for (
-                let level = currentLevel + 1;
-                level <= newLevel;
-                level++
-            ) {
-
-                const item =
-                    hierarchy.find(
-                        row =>
-                            Number(row.approval_level) === level
-                    );
-
-                if (
-                    !item ||
-                    Number(item.id) === hierarchyId
-                ) {
-
-                    continue;
-
-                }
-
-                await client.query(
-                    `
+        await client.query(
+          `
                     UPDATE approval_workflow_hierarchy
+
                     SET
                         approval_level = $1,
                         updated_at = CURRENT_TIMESTAMP
+
                     WHERE id = $2
                     `,
-                    [
-                        level - 1,
-                        item.id
-                    ]
-                );
+          [level - 1, item.id],
+        );
+      }
+    }
 
-            }
+    // MOVING UP
+    //
+    // Example:
+    //
+    // 1 Manager
+    // 2 Reviewer
+    // 3 GM
+    //
+    // Move GM from 3 -> 1
+    //
+    // Manager becomes 2
+    // Reviewer becomes 3
+    // GM becomes 1
+    else {
+      for (let level = currentLevel - 1; level >= newLevel; level--) {
+        const item = hierarchy.find(
+          (row) => Number(row.approval_level) === level,
+        );
 
+        if (!item || Number(item.id) === hierarchyId) {
+          continue;
         }
 
-        // ====================================================
-        // MOVE UP
-        //
-        // Example:
-        //
-        // 1 HR
-        // 2 MANAGER
-        // 3 ASSISTANT MANAGER
-        //
-        // ASSISTANT MANAGER 3 → 1
-        //
-        // ASSISTANT MANAGER is temporarily at 4.
-        //
-        // Then:
-        //
-        // MANAGER 2 → 3
-        // HR 1 → 2
-        //
-        // Finally:
-        //
-        // ASSISTANT MANAGER 4 → 1
-        // ====================================================
-
-        else {
-
-            for (
-                let level = currentLevel - 1;
-                level >= newLevel;
-                level--
-            ) {
-
-                const item =
-                    hierarchy.find(
-                        row =>
-                            Number(row.approval_level) === level
-                    );
-
-                if (
-                    !item ||
-                    Number(item.id) === hierarchyId
-                ) {
-
-                    continue;
-
-                }
-
-                await client.query(
-                    `
+        await client.query(
+          `
                     UPDATE approval_workflow_hierarchy
+
                     SET
                         approval_level = $1,
                         updated_at = CURRENT_TIMESTAMP
+
                     WHERE id = $2
                     `,
-                    [
-                        level + 1,
-                        item.id
-                    ]
-                );
+          [level + 1, item.id],
+        );
+      }
+    }
 
-            }
+    // FINAL UPDATE
 
-        }
-
-        // ====================================================
-        // PUT EDITED ROW INTO ITS FINAL POSITION
-        // ====================================================
-
-        const updated =
-            await client.query(
-                `
+    const updated = await client.query(
+      `
                 UPDATE approval_workflow_hierarchy
+
                 SET
                     approval_level = $1,
                     role = $2,
                     updated_at = CURRENT_TIMESTAMP
+
                 WHERE id = $3
+
                 RETURNING
                     id,
                     approval_level,
@@ -1826,317 +1631,252 @@ const updateHierarchyLevel = async (req, res) => {
                     created_at,
                     updated_at
                 `,
-                [
-                    newLevel,
-                    normalizedRole,
-                    hierarchyId
-                ]
-            );
+      [newLevel, normalizedRole, hierarchyId],
+    );
 
-        // ====================================================
-        // COMMIT TRANSACTION
-        // ====================================================
+    await client.query("COMMIT");
 
-        await client.query("COMMIT");
+    // FINAL HIERARCHY
 
-        // ====================================================
-        // RETURN COMPLETE HIERARCHY
-        // ====================================================
-
-        const finalHierarchy =
-            await pool.query(`
+    const finalHierarchy = await pool.query(
+      `
                 SELECT
                     id,
                     approval_level,
                     role,
                     created_at,
                     updated_at
+
                 FROM approval_workflow_hierarchy
+
                 ORDER BY approval_level ASC
-            `);
+                `,
+    );
 
-        return res.status(200).json({
+    return res.status(200).json({
+      message: "Approval hierarchy level updated successfully",
 
-            message:
-                "Approval hierarchy level updated successfully",
+      hierarchy: finalHierarchy.rows,
 
-            hierarchy:
-                finalHierarchy.rows,
-
-            updated:
-                updated.rows[0]
-
-        });
-
-    } catch (error) {
-
-        try {
-
-            await client.query("ROLLBACK");
-
-        } catch (rollbackError) {
-
-            console.error(
-                "Admin update hierarchy rollback error:",
-                rollbackError
-            );
-
-        }
-
-        console.error(
-            "Admin update hierarchy level error:",
-            error
-        );
-
-        if (
-            error.code === "23505"
-        ) {
-
-            return res.status(409).json({
-                message:
-                    "Approval level or role already exists"
-            });
-
-        }
-
-        if (
-            error.code === "23514"
-        ) {
-
-            return res.status(400).json({
-                message:
-                    "Approval level must always be a positive integer"
-            });
-
-        }
-
-        return res.status(500).json({
-            message:
-                "Unable to update approval hierarchy level"
-        });
-
-    } finally {
-
-        client.release();
-
+      updated: updated.rows[0],
+    });
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.error("Admin update hierarchy rollback error:", rollbackError);
     }
 
+    console.error("Admin update hierarchy level error:", error);
+
+    if (error.code === "23505") {
+      return res.status(409).json({
+        message: "Approval level or role already exists",
+      });
+    }
+
+    if (error.code === "23514") {
+      return res.status(400).json({
+        message: "Approval level must always be a positive integer",
+      });
+    }
+
+    return res.status(500).json({
+      message: "Unable to update approval hierarchy level",
+    });
+  } finally {
+    client.release();
+  }
 };
-// ============================================================
+
 // DELETE APPROVAL WORKFLOW LEVEL
-// ADMIN ONLY
-// ============================================================
 
 const deleteHierarchyLevel = async (req, res) => {
+  const client = await pool.connect();
 
-    const client = await pool.connect();
+  try {
+    const hierarchyId = Number(req.params.id);
 
-    try {
+    // VALIDATE ID
 
-        const hierarchyId =
-            Number(req.params.id);
+    if (!Number.isInteger(hierarchyId) || hierarchyId <= 0) {
+      return res.status(400).json({
+        message: "Invalid hierarchy ID",
+      });
+    }
 
-        if (
-            !Number.isInteger(hierarchyId) ||
-            hierarchyId <= 0
-        ) {
+    await client.query("BEGIN");
 
-            return res.status(400).json({
-                message:
-                    "Invalid hierarchy ID"
-            });
+    // LOCK HIERARCHY
 
-        }
-
-        await client.query("BEGIN");
-
-        // ----------------------------------------------------
-        // LOCK HIERARCHY
-        // ----------------------------------------------------
-
-        const hierarchyResult =
-            await client.query(`
+    const hierarchyResult = await client.query(
+      `
                 SELECT
                     id,
                     approval_level,
                     role
+
                 FROM approval_workflow_hierarchy
+
                 ORDER BY approval_level ASC
+
                 FOR UPDATE
-            `);
+                `,
+    );
 
-        const hierarchy =
-            hierarchyResult.rows;
+    const hierarchy = hierarchyResult.rows;
 
-        const currentIndex =
-            hierarchy.findIndex(
-                item =>
-                    Number(item.id) === hierarchyId
-            );
+    // FIND SELECTED LEVEL
 
-        if (currentIndex === -1) {
+    const currentIndex = hierarchy.findIndex(
+      (item) => Number(item.id) === hierarchyId,
+    );
 
-            await client.query("ROLLBACK");
+    if (currentIndex === -1) {
+      await client.query("ROLLBACK");
 
-            return res.status(404).json({
-                message:
-                    "Approval hierarchy level not found"
-            });
+      return res.status(404).json({
+        message: "Approval hierarchy level not found",
+      });
+    }
 
-        }
+    const deletedLevel = Number(hierarchy[currentIndex].approval_level);
 
-        const deletedLevel =
-            Number(
-                hierarchy[currentIndex].approval_level
-            );
+    const deletedRole = String(hierarchy[currentIndex].role)
+      .trim()
+      .toUpperCase();
 
-        // ----------------------------------------------------
-        // DELETE SELECTED LEVEL FIRST
-        // ----------------------------------------------------
+    // PROTECT REVIEWER IF REVIEWER USERS EXIST
+    //
+    // Since Reviewer is now the approval role, do not allow
+    // its hierarchy record to be removed while Reviewer
+    // accounts still depend on it.
 
-        await client.query(
-            `
+    if (deletedRole === "REVIEWER") {
+      const reviewerUsers = await client.query(
+        `
+                    SELECT user_id
+
+                    FROM user_table
+
+                    WHERE role_id = 3
+
+                    LIMIT 1
+                    `,
+      );
+
+      if (reviewerUsers.rows.length > 0) {
+        await client.query("ROLLBACK");
+
+        return res.status(409).json({
+          message:
+            "REVIEWER approval position cannot be deleted while Reviewer users exist",
+        });
+      }
+    }
+
+    // DELETE LEVEL
+
+    await client.query(
+      `
             DELETE FROM approval_workflow_hierarchy
+
             WHERE id = $1
             `,
-            [
-                hierarchyId
-            ]
-        );
+      [hierarchyId],
+    );
 
-        // ----------------------------------------------------
-        // SHIFT LEVELS ABOVE DELETED LEVEL DOWN
-        //
-        // Example:
-        //
-        // 1 HR
-        // 2 MANAGER
-        // 3 ASSISTANT MANAGER
-        // 4 EMPLOYEE
-        //
-        // Delete level 2.
-        //
-        // 3 -> 2
-        // 4 -> 3
-        //
-        // Updating from low to high avoids conflicts.
-        // ----------------------------------------------------
+    // SHIFT LEVELS ABOVE DOWN
 
-        for (
-            let index = currentIndex + 1;
-            index < hierarchy.length;
-            index++
-        ) {
+    for (let index = currentIndex + 1; index < hierarchy.length; index++) {
+      const item = hierarchy[index];
 
-            const item =
-                hierarchy[index];
-
-            await client.query(
-                `
+      await client.query(
+        `
                 UPDATE approval_workflow_hierarchy
+
                 SET
                     approval_level = $1,
                     updated_at = CURRENT_TIMESTAMP
+
                 WHERE id = $2
                 `,
-                [
-                    Number(item.approval_level) - 1,
-                    item.id
-                ]
-            );
+        [Number(item.approval_level) - 1, item.id],
+      );
+    }
 
-        }
+    await client.query("COMMIT");
 
-        await client.query("COMMIT");
+    // FINAL HIERARCHY
 
-        // ----------------------------------------------------
-        // RETURN COMPLETE HIERARCHY
-        // ----------------------------------------------------
-
-        const finalHierarchy =
-            await pool.query(`
+    const finalHierarchy = await pool.query(
+      `
                 SELECT
                     id,
                     approval_level,
                     role,
                     created_at,
                     updated_at
+
                 FROM approval_workflow_hierarchy
+
                 ORDER BY approval_level ASC
-            `);
+                `,
+    );
 
-        return res.status(200).json({
+    return res.status(200).json({
+      message: "Approval hierarchy level deleted successfully",
 
-            message:
-                "Approval hierarchy level deleted successfully",
+      deleted_id: hierarchyId,
 
-            deleted_id:
-                hierarchyId,
+      deleted_level: deletedLevel,
 
-            deleted_level:
-                deletedLevel,
-
-            hierarchy:
-                finalHierarchy.rows
-
-        });
-
-    } catch (error) {
-
-        try {
-            await client.query("ROLLBACK");
-        } catch (rollbackError) {
-            console.error(
-                "Admin delete hierarchy rollback error:",
-                rollbackError
-            );
-        }
-
-        console.error(
-            "Admin delete hierarchy level error:",
-            error
-        );
-
-        if (error.code === "23514") {
-
-            return res.status(400).json({
-                message:
-                    "Approval level must always be a positive integer"
-            });
-
-        }
-
-        return res.status(500).json({
-            message:
-                "Unable to delete approval hierarchy level"
-        });
-
-    } finally {
-
-        client.release();
-
+      hierarchy: finalHierarchy.rows,
+    });
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.error("Admin delete hierarchy rollback error:", rollbackError);
     }
 
+    console.error("Admin delete hierarchy level error:", error);
+
+    if (error.code === "23503") {
+      return res.status(409).json({
+        message:
+          "This approval position cannot be deleted because it is referenced by existing users or records",
+      });
+    }
+
+    if (error.code === "23514") {
+      return res.status(400).json({
+        message: "Approval level must always be a positive integer",
+      });
+    }
+
+    return res.status(500).json({
+      message: "Unable to delete approval hierarchy level",
+    });
+  } finally {
+    client.release();
+  }
 };
 
-// ============================================================
 // EXPORTS
-// ============================================================
 
 module.exports = {
+  // User management
+  getUsers,
+  createUser,
+  updateUser,
+  deactivateUser,
+  reactivateUser,
+  deleteUser,
 
-    // User management
-    getUsers,
-    createUser,
-    updateUser,
-    deactivateUser,
-    reactivateUser,
-    deleteUser,
-
-    // Approval workflow hierarchy
-    getHierarchy,
-    addHierarchyLevel,
-    updateHierarchyLevel,
-    deleteHierarchyLevel
-
+  // Approval workflow hierarchy
+  getHierarchy,
+  addHierarchyLevel,
+  updateHierarchyLevel,
+  deleteHierarchyLevel,
 };
