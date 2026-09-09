@@ -1,22 +1,38 @@
 const express = require("express");
+
 const upload = require("../middleware/uploadMiddleware");
 
 const {
     createRequest,
-    managerApproveRequest,
+
+    reviewerApproveRequest,
+
     hrApproveRequest,
+
     rejectRequest,
+
     getAllRequests,
+
     getMyRequests,
-    getPendingManagerRequests,
+
+    getPendingReviewerRequests,
+
     getPendingHRRequests,
+
+    getApprovedRequests,
+
     getRequestById,
+
     downloadAttachment,
+
     addAttachment,
+
     deleteAttachment
+
 } = require("../controllers/requestcontroller");
 
 const authenticateToken = require("../middleware/authMiddleware");
+
 const authorizeRoles = require("../middleware/roleMiddleware");
 
 const router = express.Router();
@@ -46,19 +62,35 @@ router.get(
 
 
 // ============================================================
-// GET PENDING MANAGER REQUESTS
+// GET PENDING REVIEWER REQUESTS
+//
+// Workflow:
+//
+// EMPLOYEE
+//    ↓
+// PENDING_REVIEWER
+//
+// Only REVIEWER can access these requests.
 // ============================================================
 
 router.get(
-    "/pending-manager",
+    "/pending-reviewer",
     authenticateToken,
-    authorizeRoles("MANAGER"),
-    getPendingManagerRequests
+    authorizeRoles("REVIEWER"),
+    getPendingReviewerRequests
 );
 
 
 // ============================================================
 // GET PENDING HR REQUESTS
+//
+// Workflow:
+//
+// REVIEWER APPROVES
+//        ↓
+// PENDING_HR
+//
+// Only HR can access these requests.
 // ============================================================
 
 router.get(
@@ -70,16 +102,40 @@ router.get(
 
 
 // ============================================================
+// GET APPROVED REQUESTS
+//
+// Used for displaying completed/approved plant requests.
+// ============================================================
+
+router.get(
+    "/approved",
+    authenticateToken,
+    getApprovedRequests
+);
+
+
+// ============================================================
 // DOWNLOAD REQUEST IMAGE
 //
 // Example:
+//
 // GET /api/requests/attachments/15/download
+//
+// Allowed:
+//
+// REVIEWER
+// HR
+// EMPLOYEE
 // ============================================================
 
 router.get(
     "/attachments/:id/download",
     authenticateToken,
-    authorizeRoles("MANAGER", "HR", "EMPLOYEE"),
+    authorizeRoles(
+        "REVIEWER",
+        "HR",
+        "EMPLOYEE"
+    ),
     downloadAttachment
 );
 
@@ -90,14 +146,18 @@ router.get(
 // multipart/form-data
 //
 // Fields:
+//
 // plant_name
 // common_name
 // request_type
+// request_data
 //
 // Images:
+//
 // images
 //
 // Maximum:
+//
 // 10 images
 // ============================================================
 
@@ -111,26 +171,44 @@ router.post(
 
 
 // ============================================================
-// MANAGER APPROVES REQUEST
+// REVIEWER APPROVES REQUEST
+//
+// Workflow:
+//
+// PENDING_REVIEWER
+//        ↓
+// REVIEWER APPROVES
+//        ↓
+// PENDING_HR
 //
 // Body:
+//
 // scientific_name
 // description
 // comments
 // ============================================================
 
 router.put(
-    "/:id/manager-approve",
+    "/:id/reviewer-approve",
     authenticateToken,
-    authorizeRoles("MANAGER"),
-    managerApproveRequest
+    authorizeRoles("REVIEWER"),
+    reviewerApproveRequest
 );
 
 
 // ============================================================
 // HR APPROVES REQUEST
 //
+// Workflow:
+//
+// PENDING_HR
+//      ↓
+// HR APPROVES
+//      ↓
+// APPROVED
+//
 // Body:
+//
 // comments
 // ============================================================
 
@@ -143,16 +221,28 @@ router.put(
 
 
 // ============================================================
-// MANAGER / HR REJECT REQUEST
+// REVIEWER / HR REJECT REQUEST
+//
+// Reviewer:
+//
+// PENDING_REVIEWER → REJECTED
+//
+// HR:
+//
+// PENDING_HR → REJECTED
 //
 // Body:
+//
 // comments
 // ============================================================
 
 router.put(
     "/:id/reject",
     authenticateToken,
-    authorizeRoles("MANAGER", "HR"),
+    authorizeRoles(
+        "REVIEWER",
+        "HR"
+    ),
     rejectRequest
 );
 
@@ -161,11 +251,15 @@ router.put(
 // GET REQUEST DETAILS
 //
 // Includes:
+//
 // - Request
 // - Plant information
 // - Images
 // - Approval history
-// - Permanent plant_details record if approved
+//
+// Example:
+//
+// GET /api/requests/25
 // ============================================================
 
 router.get(
@@ -174,39 +268,52 @@ router.get(
     getRequestById
 );
 
+
 // ============================================================
 // ADD IMAGE TO EXISTING REQUEST
-// MANAGER / HR
+//
+// REVIEWER / HR
 //
 // multipart/form-data
 //
 // Field:
+//
 // image
 //
 // Maximum:
+//
 // 1 image per request
 // ============================================================
 
 router.post(
     "/:id/attachments",
     authenticateToken,
-    authorizeRoles("MANAGER", "HR"),
+    authorizeRoles(
+        "REVIEWER",
+        "HR"
+    ),
     upload.single("image"),
     addAttachment
 );
 
+
 // ============================================================
 // DELETE REQUEST IMAGE
-// MANAGER / HR
+//
+// REVIEWER / HR
 //
 // Example:
+//
 // DELETE /api/requests/attachments/15
 // ============================================================
 
 router.delete(
     "/attachments/:id",
     authenticateToken,
-    authorizeRoles("MANAGER", "HR"),
+    authorizeRoles(
+        "REVIEWER",
+        "HR"
+    ),
     deleteAttachment
 );
 
