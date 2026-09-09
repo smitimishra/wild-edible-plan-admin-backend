@@ -25,6 +25,11 @@ const {
 
 } = require("../controllers/admincontroller");
 
+const {
+    getSettings,
+    updateSetting
+} = require("../controllers/settingscontroller");
+
 
 const authenticateToken =
     require("../middleware/authMiddleware");
@@ -224,6 +229,27 @@ router.delete(
 
     deleteHierarchyLevel
 
+);
+
+
+// ============================================================
+// SYSTEM SETTINGS
+// ============================================================
+
+// GET ALL SETTINGS
+router.get(
+    "/settings",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    getSettings
+);
+
+// UPDATE A SETTING
+router.patch(
+    "/settings/:key",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    updateSetting
 );
 
 
