@@ -1,5 +1,5 @@
 const pool = require("../config/db");
-const bcrypt = require("bcryptjs");
+const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
@@ -11,7 +11,6 @@ const { v4: uuidv4 } = require("uuid");
 // ============================================================
 
 const login = async (req, res) => {
-
     try {
 
         const {
@@ -20,155 +19,197 @@ const login = async (req, res) => {
         } = req.body;
 
 
-        // ----------------------------------------------------
+        // --------------------------------------------------------
         // VALIDATION
-        // ----------------------------------------------------
+        // --------------------------------------------------------
 
         if (!email || !password) {
-
             return res.status(400).json({
-
-                message:
-                    "Email and password are required"
-
+                message: "Email and password are required"
             });
-
         }
 
 
-        // ----------------------------------------------------
-        // FIND USER
-        // ----------------------------------------------------
+        const normalizedEmail =
+            String(email).trim().toLowerCase();
+
+
+        // ========================================================
+        // GET USER FROM NEW USER TABLE
+        // ========================================================
 
         const result = await pool.query(
             `
             SELECT
-                id,
-                employee_code,
-                name,
-                email,
-                role,
-                password_hash,
-                is_active
-            FROM users
-            WHERE LOWER(email) = LOWER($1)
+                u.user_id,
+                u.employee_code,
+                u.user_name,
+                u.phone_number,
+                u.email_id,
+                u.password_hash,
+                u.is_active,
+                u.role_id,
+                u.approval_position_id,
+                u.approval_position,
+
+                r.role_name
+
+            FROM public.user_table u
+
+            LEFT JOIN public.role_table r
+                ON r.role_id = u.role_id
+
+            WHERE LOWER(u.email_id) = LOWER($1)
+
+            LIMIT 1
             `,
-            [email.trim()]
+            [normalizedEmail]
         );
 
 
-        // ----------------------------------------------------
-        // USER NOT FOUND
-        // ----------------------------------------------------
-
         if (result.rows.length === 0) {
-
             return res.status(401).json({
-
-                message:
-                    "Invalid email or password"
-
+                message: "Invalid email or password"
             });
-
         }
 
 
         const user = result.rows[0];
 
 
-        // ----------------------------------------------------
-        // CHECK ACCOUNT STATUS
-        // ----------------------------------------------------
+        // ========================================================
+        // CHECK ACTIVE USER
+        // ========================================================
 
         if (user.is_active === false) {
-
             return res.status(403).json({
-
-                message:
-                    "Your account has been deactivated. Please contact the administrator."
-
+                message: "Your account is inactive. Please contact the administrator."
             });
-
         }
 
 
-        // ----------------------------------------------------
+        // ========================================================
         // CHECK PASSWORD
-        // ----------------------------------------------------
+        // ========================================================
 
-        const passwordMatch =
+        if (!user.password_hash) {
+            return res.status(401).json({
+                message: "Invalid email or password"
+            });
+        }
+
+
+        const passwordMatches =
             await bcrypt.compare(
                 password,
                 user.password_hash
             );
 
 
-        if (!passwordMatch) {
-
+        if (!passwordMatches) {
             return res.status(401).json({
-
-                message:
-                    "Invalid email or password"
-
+                message: "Invalid email or password"
             });
-
         }
 
 
-        // ----------------------------------------------------
-        // CHECK FOR EXISTING ACTIVE SESSION
-        // ----------------------------------------------------
+        // ========================================================
+        // NORMALIZE ROLE
+        // ========================================================
 
-        const existingSession = await pool.query(
-            `SELECT id, session_id
-             FROM user_sessions
-             WHERE user_id = $1
-               AND is_active = true
-             ORDER BY created_at DESC
-             LIMIT 1`,
-            [user.id]
-        );
+        const role =
+            user.role_name
+                ? String(user.role_name).trim().toUpperCase()
+                : "";
+
+
+        console.log("================================================");
+        console.log("LOGIN USER");
+        console.log("User ID:", user.user_id);
+        console.log("Email:", user.email_id);
+        console.log("Role ID:", user.role_id);
+        console.log("Role:", role);
+        console.log("================================================");
+
+
+        if (!role) {
+            return res.status(403).json({
+                message: "User role is not configured. Please contact the administrator."
+            });
+        }
+
+
+        // ========================================================
+        // CHECK EXISTING ACTIVE SESSION
+        // ========================================================
+
+        const existingSession =
+            await pool.query(
+                `
+                SELECT
+                    session_id,
+                    user_id,
+                    is_active,
+                    created_at
+                FROM public.user_sessions
+                WHERE user_id = $1
+                  AND is_active = true
+                ORDER BY created_at DESC
+                LIMIT 1
+                `,
+                [user.user_id]
+            );
+
 
         if (existingSession.rows.length > 0) {
 
-            // Active session exists — return conflict so
-            // the frontend can show the "already logged in" popup
-
             return res.status(409).json({
-
-                message:
-                    "active_session_exists",
-
+                message: "active_session_exists",
                 existing_session_id:
                     existingSession.rows[0].session_id
-
             });
 
         }
 
 
-        // ----------------------------------------------------
+        // ========================================================
+        // CREATE NEW SESSION
+        // ========================================================
+
+        const sessionId =
+            uuidv4();
+
+
+        const expiresAt =
+            new Date(
+                Date.now() +
+                60 * 60 * 1000
+            );
+
+
+        // ========================================================
         // CREATE JWT
-        // ----------------------------------------------------
-
-        const sessionId = uuidv4();
-
-        const expiresAt = new Date(
-            Date.now() + 60 * 60 * 1000   // 1 hour
-        );
+        // ========================================================
 
         const token =
             jwt.sign(
-
                 {
-                    id:
-                        user.id,
+                    id: user.user_id,
+
+                    user_id: user.user_id,
+
+                    employee_id: user.user_id,
+
+                    employee_code:
+                        user.employee_code,
 
                     email:
-                        user.email,
+                        user.email_id,
 
-                    role:
-                        user.role,
+                    role: role,
+
+                    role_id:
+                        user.role_id,
 
                     session_id:
                         sessionId
@@ -177,88 +218,116 @@ const login = async (req, res) => {
                 process.env.JWT_SECRET,
 
                 {
-                    expiresIn:
-                        "1h"
+                    expiresIn: "1h"
                 }
-
             );
 
 
-        // ----------------------------------------------------
-        // RECORD SESSION IN user_sessions TABLE
-        // ----------------------------------------------------
+        // ========================================================
+        // SAVE SESSION
+        // ========================================================
 
         await pool.query(
-            `INSERT INTO user_sessions
-                 (user_id, session_id, is_active, created_at, last_activity, expires_at)
-             VALUES
-                 ($1, $2, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $3)`,
-            [user.id, sessionId, expiresAt]
+            `
+            INSERT INTO public.user_sessions (
+                user_id,
+                session_id,
+                is_active,
+                expires_at
+            )
+            VALUES (
+                $1,
+                $2,
+                true,
+                $3
+            )
+            `,
+            [
+                user.user_id,
+                sessionId,
+                expiresAt
+            ]
         );
 
 
-        // ----------------------------------------------------
-        // LOGIN RESPONSE
-        // ----------------------------------------------------
+        // ========================================================
+        // RESPONSE
+        // ========================================================
 
         return res.status(200).json({
 
-            message:
-                "Login successful",
+            message: "Login successful",
 
-            token,
+            token: token,
 
             user: {
 
                 id:
-                    user.id,
+                    user.user_id,
+
+                user_id:
+                    user.user_id,
+
+                employee_id:
+                    user.user_id,
 
                 employee_code:
                     user.employee_code,
 
                 name:
-                    user.name,
+                    user.user_name,
+
+                user_name:
+                    user.user_name,
+
+                phone_number:
+                    user.phone_number,
 
                 email:
-                    user.email,
+                    user.email_id,
+
+                email_id:
+                    user.email_id,
 
                 role:
-                    user.role
+                    role,
+
+                role_id:
+                    user.role_id,
+
+                approval_position_id:
+                    user.approval_position_id,
+
+                approval_position:
+                    user.approval_position,
+
+                is_active:
+                    user.is_active
 
             }
 
         });
 
+    }
 
-    } catch (error) {
+    catch (error) {
 
         console.error(
             "Login error:",
             error
         );
 
-
         return res.status(500).json({
-
-            message:
-                "Login failed",
-
-            error:
-                error.message
-
+            message: "Unable to process login request"
         });
 
     }
-
 };
+
 
 
 // ============================================================
 // REGISTER
-// ============================================================
-// NOTE:
-// Registration creates normal EMPLOYEE accounts.
-// ADMIN creates MANAGER / HR accounts through the Admin panel.
 // ============================================================
 
 const register = async (req, res) => {
@@ -266,29 +335,55 @@ const register = async (req, res) => {
     try {
 
         const {
-            employee_code,
             name,
+            user_name,
+            phone_number,
             email,
-            password
+            email_id,
+            password,
+            employee_code
         } = req.body;
 
 
-        // ----------------------------------------------------
+        // --------------------------------------------------------
+        // NORMALIZE
+        // --------------------------------------------------------
+
+        const finalUserName =
+            String(
+                user_name ||
+                name ||
+                ""
+            ).trim();
+
+
+        const finalEmail =
+            String(
+                email_id ||
+                email ||
+                ""
+            ).trim().toLowerCase();
+
+
+        const finalPhone =
+            phone_number
+                ? String(phone_number).trim()
+                : null;
+
+
+        // --------------------------------------------------------
         // VALIDATION
-        // ----------------------------------------------------
+        // --------------------------------------------------------
 
         if (
-            !employee_code ||
-            !name ||
-            !email ||
+            !finalUserName ||
+            !finalEmail ||
             !password
         ) {
 
             return res.status(400).json({
-
                 message:
-                    "Employee code, name, email and password are required"
-
+                    "Name, email and password are required"
             });
 
         }
@@ -297,86 +392,43 @@ const register = async (req, res) => {
         if (password.length < 6) {
 
             return res.status(400).json({
-
                 message:
                     "Password must be at least 6 characters long"
-
             });
 
         }
 
 
-        // ----------------------------------------------------
-        // NORMALIZE VALUES
-        // ----------------------------------------------------
-
-        const normalizedEmployeeCode =
-            employee_code.trim();
-
-        const normalizedName =
-            name.trim();
-
-        const normalizedEmail =
-            email.trim().toLowerCase();
-
-
-        // ----------------------------------------------------
+        // ========================================================
         // CHECK EXISTING EMAIL
-        // ----------------------------------------------------
+        // ========================================================
 
         const existingEmail =
             await pool.query(
                 `
-                SELECT id
-                FROM users
-                WHERE LOWER(email) = $1
+                SELECT
+                    user_id
+                FROM public.user_table
+                WHERE LOWER(email_id) = LOWER($1)
+                LIMIT 1
                 `,
-                [normalizedEmail]
+                [finalEmail]
             );
 
 
         if (existingEmail.rows.length > 0) {
 
             return res.status(409).json({
-
                 message:
                     "A user with this email already exists"
-
             });
 
         }
 
 
-        // ----------------------------------------------------
-        // CHECK EXISTING EMPLOYEE CODE
-        // ----------------------------------------------------
-
-        const existingEmployeeCode =
-            await pool.query(
-                `
-                SELECT id
-                FROM users
-                WHERE employee_code = $1
-                `,
-                [normalizedEmployeeCode]
-            );
-
-
-        if (existingEmployeeCode.rows.length > 0) {
-
-            return res.status(409).json({
-
-                message:
-                    "A user with this employee code already exists"
-
-            });
-
-        }
-
-
-        // ----------------------------------------------------
+        // ========================================================
         // HASH PASSWORD
-        // ----------------------------------------------------
+        // ========================================================
 
         const passwordHash =
             await bcrypt.hash(
@@ -385,83 +437,231 @@ const register = async (req, res) => {
             );
 
 
-        // ----------------------------------------------------
-        // CREATE EMPLOYEE
-        // ----------------------------------------------------
+        // ========================================================
+        // GET EMPLOYEE ROLE
+        // ========================================================
 
-        const result =
+        const roleResult =
             await pool.query(
                 `
-                INSERT INTO users (
-                    employee_code,
-                    name,
-                    email,
-                    role,
+                SELECT
+                    role_id,
+                    role_name
+                FROM public.role_table
+                WHERE UPPER(role_name) = 'EMPLOYEE'
+                LIMIT 1
+                `
+            );
+
+
+        if (roleResult.rows.length === 0) {
+
+            return res.status(500).json({
+                message:
+                    "Employee role is not configured"
+            });
+
+        }
+
+
+        const employeeRole =
+            roleResult.rows[0];
+
+
+        // ========================================================
+        // GENERATE USER ID IF NEEDED
+        // ========================================================
+
+        let finalUserId;
+
+
+        if (
+            employee_code !== undefined &&
+            employee_code !== null &&
+            String(employee_code).trim() !== ""
+        ) {
+
+            // Employee code is kept as supplied.
+            // User ID is still generated by the database sequence
+            // when not explicitly provided.
+
+            finalUserId = null;
+
+        }
+
+
+        // ========================================================
+        // INSERT USER
+        // ========================================================
+
+        let insertQuery;
+        let insertValues;
+
+
+        if (finalUserId !== null) {
+
+            insertQuery =
+                `
+                INSERT INTO public.user_table (
+                    user_id,
+                    role_id,
+                    user_name,
+                    phone_number,
+                    email_id,
                     password_hash,
-                    is_active,
-                    manager_id
+                    employee_code,
+                    is_active
                 )
                 VALUES (
                     $1,
                     $2,
                     $3,
-                    'EMPLOYEE',
                     $4,
-                    TRUE,
-                    NULL
+                    $5,
+                    $6,
+                    $7,
+                    true
                 )
                 RETURNING
-                    id,
+                    user_id,
+                    role_id,
+                    user_name,
+                    phone_number,
+                    email_id,
                     employee_code,
-                    name,
-                    email,
-                    role,
-                    is_active,
-                    manager_id,
-                    created_at
-                `,
-                [
-                    normalizedEmployeeCode,
-                    normalizedName,
-                    normalizedEmail,
-                    passwordHash
-                ]
+                    is_active
+                `;
+
+            insertValues = [
+                finalUserId,
+                employeeRole.role_id,
+                finalUserName,
+                finalPhone,
+                finalEmail,
+                passwordHash,
+                String(employee_code).trim()
+            ];
+
+        }
+
+        else {
+
+            insertQuery =
+                `
+                INSERT INTO public.user_table (
+                    role_id,
+                    user_name,
+                    phone_number,
+                    email_id,
+                    password_hash,
+                    is_active
+                )
+                VALUES (
+                    $1,
+                    $2,
+                    $3,
+                    $4,
+                    $5,
+                    true
+                )
+                RETURNING
+                    user_id,
+                    role_id,
+                    user_name,
+                    phone_number,
+                    email_id,
+                    employee_code,
+                    is_active
+                `;
+
+            insertValues = [
+                employeeRole.role_id,
+                finalUserName,
+                finalPhone,
+                finalEmail,
+                passwordHash
+            ];
+
+        }
+
+
+        const result =
+            await pool.query(
+                insertQuery,
+                insertValues
             );
 
 
-        // ----------------------------------------------------
+        const createdUser =
+            result.rows[0];
+
+
+        // ========================================================
         // RESPONSE
-        // ----------------------------------------------------
+        // ========================================================
 
         return res.status(201).json({
 
             message:
-                "Employee registered successfully",
+                "Registration successful",
 
-            user:
-                result.rows[0]
+            user: {
+
+                id:
+                    createdUser.user_id,
+
+                user_id:
+                    createdUser.user_id,
+
+                employee_code:
+                    createdUser.employee_code,
+
+                role_id:
+                    createdUser.role_id,
+
+                role:
+                    "EMPLOYEE",
+
+                name:
+                    createdUser.user_name,
+
+                user_name:
+                    createdUser.user_name,
+
+                phone_number:
+                    createdUser.phone_number,
+
+                email:
+                    createdUser.email_id,
+
+                email_id:
+                    createdUser.email_id,
+
+                is_active:
+                    createdUser.is_active
+
+            }
 
         });
 
+    }
 
-    } catch (error) {
+    catch (error) {
 
         console.error(
             "Register error:",
             error
         );
 
-
         return res.status(500).json({
-
             message:
-                "Unable to register user"
-
+                "Unable to process registration"
         });
 
     }
 
 };
+
 
 
 // ============================================================
@@ -477,54 +677,50 @@ const forgotPassword = async (req, res) => {
         } = req.body;
 
 
-        // ----------------------------------------------------
-        // VALIDATION
-        // ----------------------------------------------------
-
         if (!email) {
 
             return res.status(400).json({
-
                 message:
                     "Email is required"
-
             });
 
         }
 
 
         const normalizedEmail =
-            email.trim().toLowerCase();
+            String(email)
+                .trim()
+                .toLowerCase();
 
 
-        // ----------------------------------------------------
+        // ========================================================
         // FIND USER
-        // ----------------------------------------------------
+        // ========================================================
 
         const result =
             await pool.query(
                 `
                 SELECT
-                    id,
-                    email
-                FROM users
-                WHERE LOWER(email) = $1
+                    user_id,
+                    email_id,
+                    user_name
+                FROM public.user_table
+                WHERE LOWER(email_id) = LOWER($1)
+                LIMIT 1
                 `,
                 [normalizedEmail]
             );
 
 
-        // ----------------------------------------------------
-        // SAME RESPONSE WHETHER USER EXISTS OR NOT
-        // ----------------------------------------------------
+        /*
+         * Do not reveal whether an email exists.
+         */
 
         if (result.rows.length === 0) {
 
             return res.status(200).json({
-
                 message:
                     "If an account exists with this email, a password reset link has been sent."
-
             });
 
         }
@@ -534,74 +730,81 @@ const forgotPassword = async (req, res) => {
             result.rows[0];
 
 
-        // ----------------------------------------------------
-        // GENERATE RESET TOKEN
-        // ----------------------------------------------------
+        // ========================================================
+        // CREATE RESET TOKEN
+        // ========================================================
 
         const resetToken =
-            crypto
-                .randomBytes(32)
-                .toString("hex");
+            crypto.randomBytes(32).toString("hex");
 
 
-        // ----------------------------------------------------
-        // HASH RESET TOKEN
-        // ----------------------------------------------------
-
-        const resetTokenHash =
+        const tokenHash =
             crypto
                 .createHash("sha256")
                 .update(resetToken)
                 .digest("hex");
 
 
-        // ----------------------------------------------------
-        // TOKEN EXPIRATION
-        // 15 MINUTES
-        // ----------------------------------------------------
-
-        const resetExpiresAt =
+        const expiresAt =
             new Date(
-                Date.now() + 15 * 60 * 1000
+                Date.now() +
+                15 * 60 * 1000
             );
 
 
-        // ----------------------------------------------------
-        // SAVE TOKEN
-        // ----------------------------------------------------
+        // ========================================================
+        // STORE RESET TOKEN
+        // ========================================================
 
         await pool.query(
             `
-            UPDATE users
+            UPDATE public.user_table
             SET
                 password_reset_token_hash = $1,
                 password_reset_expires_at = $2
-            WHERE id = $3
+            WHERE user_id = $3
             `,
             [
-                resetTokenHash,
-                resetExpiresAt,
-                user.id
+                tokenHash,
+                expiresAt,
+                user.user_id
             ]
         );
 
 
-        // ----------------------------------------------------
+        // ========================================================
         // RESET URL
-        // ----------------------------------------------------
+        // ========================================================
+
+        const frontendUrl =
+            process.env.FRONTEND_URL ||
+            "http://localhost:4200";
+
 
         const resetUrl =
-            `http://192.168.29.51:4200/reset-password?token=${resetToken}`;
+            `${frontendUrl}/reset-password?token=${resetToken}`;
 
 
-        // ----------------------------------------------------
-        // EMAIL TRANSPORTER
-        // ----------------------------------------------------
+        // ========================================================
+        // MAILER
+        // ========================================================
 
         const transporter =
             nodemailer.createTransport({
 
-                service: "gmail",
+                host:
+                    process.env.EMAIL_HOST,
+
+                port:
+                    Number(
+                        process.env.EMAIL_PORT ||
+                        587
+                    ),
+
+                secure:
+                    String(
+                        process.env.EMAIL_SECURE
+                    ) === "true",
 
                 auth: {
 
@@ -616,9 +819,9 @@ const forgotPassword = async (req, res) => {
             });
 
 
-        // ----------------------------------------------------
+        // ========================================================
         // SEND EMAIL
-        // ----------------------------------------------------
+        // ========================================================
 
         await transporter.sendMail({
 
@@ -632,7 +835,13 @@ const forgotPassword = async (req, res) => {
                 "Password Reset - Plant Approval Workflow",
 
             html: `
-                <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+
+                <div
+                    style="
+                        font-family: Arial, sans-serif;
+                        line-height: 1.6;
+                    "
+                >
 
                     <h2>
                         Password Reset
@@ -647,6 +856,7 @@ const forgotPassword = async (req, res) => {
                     </p>
 
                     <p>
+
                         <a
                             href="${resetUrl}"
                             style="
@@ -660,6 +870,7 @@ const forgotPassword = async (req, res) => {
                         >
                             Reset Password
                         </a>
+
                     </p>
 
                     <p>
@@ -672,14 +883,11 @@ const forgotPassword = async (req, res) => {
                     </p>
 
                 </div>
+
             `
 
         });
 
-
-        // ----------------------------------------------------
-        // RESPONSE
-        // ----------------------------------------------------
 
         return res.status(200).json({
 
@@ -688,25 +896,24 @@ const forgotPassword = async (req, res) => {
 
         });
 
+    }
 
-    } catch (error) {
+    catch (error) {
 
         console.error(
             "Forgot password error:",
             error
         );
 
-
         return res.status(500).json({
-
             message:
                 "Unable to process password reset request"
-
         });
 
     }
 
 };
+
 
 
 // ============================================================
@@ -723,17 +930,15 @@ const resetPassword = async (req, res) => {
         } = req.body;
 
 
-        // ----------------------------------------------------
+        // --------------------------------------------------------
         // VALIDATION
-        // ----------------------------------------------------
+        // --------------------------------------------------------
 
         if (!token || !newPassword) {
 
             return res.status(400).json({
-
                 message:
                     "Token and new password are required"
-
             });
 
         }
@@ -742,18 +947,16 @@ const resetPassword = async (req, res) => {
         if (newPassword.length < 6) {
 
             return res.status(400).json({
-
                 message:
                     "Password must be at least 6 characters long"
-
             });
 
         }
 
 
-        // ----------------------------------------------------
+        // ========================================================
         // HASH TOKEN
-        // ----------------------------------------------------
+        // ========================================================
 
         const tokenHash =
             crypto
@@ -762,19 +965,20 @@ const resetPassword = async (req, res) => {
                 .digest("hex");
 
 
-        // ----------------------------------------------------
+        // ========================================================
         // FIND VALID TOKEN
-        // ----------------------------------------------------
+        // ========================================================
 
         const result =
             await pool.query(
                 `
                 SELECT
-                    id
-                FROM users
+                    user_id
+                FROM public.user_table
                 WHERE
                     password_reset_token_hash = $1
                     AND password_reset_expires_at > NOW()
+                LIMIT 1
                 `,
                 [tokenHash]
             );
@@ -783,22 +987,20 @@ const resetPassword = async (req, res) => {
         if (result.rows.length === 0) {
 
             return res.status(400).json({
-
                 message:
                     "Invalid or expired password reset token"
-
             });
 
         }
 
 
         const userId =
-            result.rows[0].id;
+            result.rows[0].user_id;
 
 
-        // ----------------------------------------------------
+        // ========================================================
         // HASH NEW PASSWORD
-        // ----------------------------------------------------
+        // ========================================================
 
         const passwordHash =
             await bcrypt.hash(
@@ -807,19 +1009,18 @@ const resetPassword = async (req, res) => {
             );
 
 
-        // ----------------------------------------------------
+        // ========================================================
         // UPDATE PASSWORD
-        // CLEAR RESET TOKEN
-        // ----------------------------------------------------
+        // ========================================================
 
         await pool.query(
             `
-            UPDATE users
+            UPDATE public.user_table
             SET
                 password_hash = $1,
                 password_reset_token_hash = NULL,
                 password_reset_expires_at = NULL
-            WHERE id = $2
+            WHERE user_id = $2
             `,
             [
                 passwordHash,
@@ -828,9 +1029,23 @@ const resetPassword = async (req, res) => {
         );
 
 
-        // ----------------------------------------------------
-        // RESPONSE
-        // ----------------------------------------------------
+        // ========================================================
+        // INVALIDATE EXISTING SESSIONS
+        // ========================================================
+
+        await pool.query(
+            `
+            UPDATE public.user_sessions
+            SET
+                is_active = false,
+                invalidated_at = CURRENT_TIMESTAMP,
+                invalidation_reason = 'password_reset'
+            WHERE user_id = $1
+              AND is_active = true
+            `,
+            [userId]
+        );
+
 
         return res.status(200).json({
 
@@ -839,20 +1054,18 @@ const resetPassword = async (req, res) => {
 
         });
 
+    }
 
-    } catch (error) {
+    catch (error) {
 
         console.error(
             "Reset password error:",
             error
         );
 
-
         return res.status(500).json({
-
             message:
                 "Unable to reset password"
-
         });
 
     }
@@ -860,58 +1073,74 @@ const resetPassword = async (req, res) => {
 };
 
 
-// ============================================================
+
 // ============================================================
 // FORCE LOGOUT SESSION
-// ============================================================
-// Called when the user clicks OK on the "already logged in on
-// another device" popup.  Marks the existing session inactive
-// so the next login attempt can proceed.
 // ============================================================
 
 const forceLogoutSession = async (req, res) => {
 
     try {
 
-        const { session_id } = req.body;
+        const {
+            session_id
+        } = req.body;
 
 
         if (!session_id) {
 
             return res.status(400).json({
-                message: "session_id is required"
+                message:
+                    "session_id is required"
             });
 
         }
 
 
         await pool.query(
-            `UPDATE user_sessions
-             SET    is_active          = false,
-                    invalidated_at     = CURRENT_TIMESTAMP,
-                    invalidation_reason = 'forced_logout_by_new_login'
-             WHERE  session_id = $1`,
+            `
+            UPDATE public.user_sessions
+            SET
+                is_active = false,
+                invalidated_at = CURRENT_TIMESTAMP,
+                invalidation_reason =
+                    'forced_logout_by_new_login'
+            WHERE session_id = $1
+            `,
             [session_id]
         );
 
 
         return res.status(200).json({
-            message: "Session invalidated successfully"
+
+            message:
+                "Session invalidated successfully"
+
         });
 
+    }
 
-    } catch (error) {
+    catch (error) {
 
-        console.error("forceLogoutSession error:", error);
+        console.error(
+            "forceLogoutSession error:",
+            error
+        );
 
         return res.status(500).json({
-            message: "Failed to invalidate session",
-            error: error.message
+
+            message:
+                "Failed to invalidate session",
+
+            error:
+                error.message
+
         });
 
     }
 
 };
+
 
 
 // ============================================================
@@ -921,9 +1150,13 @@ const forceLogoutSession = async (req, res) => {
 module.exports = {
 
     login,
+
     register,
+
     forgotPassword,
+
     resetPassword,
+
     forceLogoutSession
 
 };

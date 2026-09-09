@@ -290,7 +290,7 @@ const createUser = async (req, res) => {
       email_id !== undefined && email_id !== null ? email_id : email,
     );
 
-    const finalPhone = normalizePhone(phone_number);
+    const finalPhone = normalizePhone(phone_number) ?? "";
 
     // VALIDATION
 
@@ -514,6 +514,16 @@ const createUser = async (req, res) => {
     if (error.code === "23505") {
       return res.status(409).json({
         message: "User ID, email, or employee code already exists",
+      });
+    }
+
+    if (error.code === "23502") {
+      return res.status(400).json({
+        message: error.column
+          ? `Missing required field: ${error.column}`
+          : "Missing a required field",
+
+        error: process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }
 
