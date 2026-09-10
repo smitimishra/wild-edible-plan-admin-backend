@@ -12,7 +12,7 @@ function ensureMonitorRunning() {
 
     monitorProcess = spawn(
         "powershell.exe",
-        ["-ExecutionPolicy", "Bypass", "-File", "./monitor.ps1"],
+        ["-ExecutionPolicy", "Bypass", "-File", "./monitor_health_checker_db.ps1"],
         { cwd: monitorDirectory, detached: true, stdio: "ignore", windowsHide: true }
     );
 

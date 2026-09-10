@@ -1,45 +1,54 @@
 ﻿{
-    "timestamp":  "2026-09-09 15:38:30",
+    "timestamp":  "2026-09-10 11:35:11",
     "computer":  "DESKTOP-VE8HETH",
-    "overallStatus":  "CRITICAL",
+    "overallStatus":  "WARNING",
     "system":  {
                    "cpu":  {
-                               "usage":  82.97,
-                               "status":  "WARNING"
+                               "usage":  24.6,
+                               "status":  "NORMAL"
                            },
                    "memory":  {
-                                  "usage":  93.16,
-                                  "status":  "CRITICAL"
+                                  "usage":  84.01,
+                                  "status":  "WARNING"
                               },
                    "disk":  {
                                 "drive":  "C:",
-                                "usage":  76.47,
+                                "usage":  75.93,
                                 "status":  "NORMAL"
                             }
                },
     "services":  {
                      "angular":  {
-                                     "status":  "WARNING",
+                                     "status":  "UP",
                                      "httpStatus":  200,
-                                     "responseTime":  626.82,
+                                     "responseTime":  128.62,
                                      "url":  "http://192.168.29.216:8200/welcome",
                                      "error":  ""
                                  },
                      "backend":  {
                                      "status":  "UP",
                                      "port":  8080,
-                                     "responseTime":  39.11,
+                                     "responseTime":  24.93,
                                      "host":  "192.168.29.216",
                                      "error":  ""
-                                 }
+                                 },
+                     "database":  {
+                                      "status":  "UP",
+                                      "host":  "192.168.29.98",
+                                      "port":  5432,
+                                      "name":  "wildplant",
+                                      "user":  "postgres",
+                                      "responseTime":  404.65,
+                                      "checkType":  "TCP",
+                                      "error":  "psql.exe not found. TCP port check passed; database authentication was not tested."
+                                  }
                  },
     "alerts":  {
                    "warnings":  [
-                                    "CPU usage is 82.97%",
-                                    "Angular response time is 626.82 ms"
+                                    "Memory usage is 84.01%"
                                 ],
                    "critical":  [
-                                    "Memory usage is 93.16%"
+
                                 ]
                }
 }
