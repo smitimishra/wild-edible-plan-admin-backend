@@ -560,6 +560,155 @@ const updateUser = async (req, res) => {
 
 };
 
+// ============================================================
+// RESET USER PASSWORD
+// ADMIN ONLY
+// ============================================================
+
+const resetUserPassword = async (req, res) => {
+
+    try {
+
+        const userId = Number(req.params.id);
+
+        // ----------------------------------------------------
+        // VALIDATE USER ID
+        // ----------------------------------------------------
+
+        if (!Number.isInteger(userId) || userId <= 0) {
+
+            return res.status(400).json({
+                message: "Invalid user ID"
+            });
+
+        }
+
+
+        const { newPassword } = req.body;
+
+
+        // ----------------------------------------------------
+        // VALIDATE PASSWORD
+        // ----------------------------------------------------
+
+        if (
+            typeof newPassword !== "string" ||
+            !newPassword.trim()
+        ) {
+
+            return res.status(400).json({
+                message: "New password is required"
+            });
+
+        }
+
+
+        if (newPassword.length < 6) {
+
+            return res.status(400).json({
+                message: "Password must be at least 6 characters long"
+            });
+
+        }
+
+
+        // ----------------------------------------------------
+        // CHECK USER EXISTS
+        // ----------------------------------------------------
+
+        const userResult = await pool.query(
+            `
+            SELECT
+                id,
+                name,
+                email,
+                role,
+                is_active
+            FROM users
+            WHERE id = $1
+            `,
+            [
+                userId
+            ]
+        );
+
+
+        if (userResult.rows.length === 0) {
+
+            return res.status(404).json({
+                message: "User not found"
+            });
+
+        }
+
+
+        // ----------------------------------------------------
+        // HASH NEW PASSWORD
+        // ----------------------------------------------------
+
+        const passwordHash =
+            await bcrypt.hash(
+                newPassword,
+                10
+            );
+
+
+        // ----------------------------------------------------
+        // UPDATE PASSWORD
+        // ----------------------------------------------------
+
+        const result = await pool.query(
+            `
+            UPDATE users
+            SET password_hash = $1
+            WHERE id = $2
+            RETURNING
+                id,
+                employee_code,
+                name,
+                email,
+                role,
+                is_active
+            `,
+            [
+                passwordHash,
+                userId
+            ]
+        );
+
+
+        // ----------------------------------------------------
+        // SUCCESS RESPONSE
+        // ----------------------------------------------------
+
+        return res.status(200).json({
+
+            message: "Password reset successfully",
+
+            user: result.rows[0]
+
+        });
+
+
+    } catch (error) {
+
+        console.error(
+            "Admin reset password error:",
+            error
+        );
+
+
+        return res.status(500).json({
+
+            message:
+                "Unable to reset user password"
+
+        });
+
+    }
+
+};
+
 
 // ============================================================
 // DEACTIVATE USER
@@ -2125,15 +2274,14 @@ const deleteHierarchyLevel = async (req, res) => {
 
 module.exports = {
 
-    // User management
     getUsers,
     createUser,
     updateUser,
     deactivateUser,
     reactivateUser,
     deleteUser,
+    resetUserPassword,
 
-    // Approval workflow hierarchy
     getHierarchy,
     addHierarchyLevel,
     updateHierarchyLevel,

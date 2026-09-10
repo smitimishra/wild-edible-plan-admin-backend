@@ -1,22 +1,13 @@
 const express = require("express");
 
 const {
-
-    // ========================================================
-    // USER MANAGEMENT
-    // ========================================================
-
     getUsers,
     createUser,
     updateUser,
     deactivateUser,
     reactivateUser,
     deleteUser,
-
-
-    // ========================================================
-    // APPROVAL WORKFLOW HIERARCHY
-    // ========================================================
+    resetUserPassword,
 
     getHierarchy,
     addHierarchyLevel,
@@ -24,7 +15,6 @@ const {
     deleteHierarchyLevel
 
 } = require("../controllers/admincontroller");
-
 
 const authenticateToken =
     require("../middleware/authMiddleware");
@@ -226,5 +216,22 @@ router.delete(
 
 );
 
+// ============================================================
+// RESET USER PASSWORD
+// ADMIN ONLY
+// ============================================================
+console.log("REGISTERING RESET PASSWORD ROUTE");
+router.patch(
 
+    "/users/:id/reset-password",
+
+    authenticateToken,
+
+    authorizeRoles("ADMIN"),
+
+    resetUserPassword
+
+);
+
+console.log("RESET PASSWORD ROUTE LOADED");
 module.exports = router;

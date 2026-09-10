@@ -10,13 +10,18 @@ const { v4: uuidv4 } = require("uuid");
 // LOGIN
 // ============================================================
 
+// ============================================================
+// LOGIN
+// ============================================================
+
 const login = async (req, res) => {
 
     try {
 
         const {
             email,
-            password
+            password,
+
         } = req.body;
 
 
@@ -27,10 +32,7 @@ const login = async (req, res) => {
         if (!email || !password) {
 
             return res.status(400).json({
-
-                message:
-                    "Email and password are required"
-
+                message: "Email and password are required"
             });
 
         }
@@ -43,15 +45,17 @@ const login = async (req, res) => {
         const result = await pool.query(
             `
             SELECT
-                id,
-                employee_code,
-                name,
-                email,
-                role,
-                password_hash,
-                is_active
-            FROM users
-            WHERE LOWER(email) = LOWER($1)
+                u.user_id,
+                u.user_name,
+                u.phone_number,
+                u.email_id,
+                u.role_id,
+                u.password_hash,
+                r.role_name
+            FROM user_table u
+            LEFT JOIN role_table r
+                ON u.role_id = r.role_id
+            WHERE LOWER(u.email_id) = LOWER($1)
             `,
             [email.trim()]
         );
@@ -64,10 +68,7 @@ const login = async (req, res) => {
         if (result.rows.length === 0) {
 
             return res.status(401).json({
-
-                message:
-                    "Invalid email or password"
-
+                message: "Invalid email or password"
             });
 
         }
@@ -77,67 +78,48 @@ const login = async (req, res) => {
 
 
         // ----------------------------------------------------
-        // CHECK ACCOUNT STATUS
-        // ----------------------------------------------------
-
-        if (user.is_active === false) {
-
-            return res.status(403).json({
-
-                message:
-                    "Your account has been deactivated. Please contact the administrator."
-
-            });
-
-        }
-
-
-        // ----------------------------------------------------
         // CHECK PASSWORD
         // ----------------------------------------------------
 
-        const passwordMatch =
-            await bcrypt.compare(
-                password,
-                user.password_hash
-            );
+        const passwordMatch = await bcrypt.compare(
+            password,
+            user.password_hash
+        );
 
 
         if (!passwordMatch) {
 
             return res.status(401).json({
-
-                message:
-                    "Invalid email or password"
-
+                message: "Invalid email or password"
             });
 
         }
 
 
         // ----------------------------------------------------
-        // CHECK FOR EXISTING ACTIVE SESSION
+        // CHECK EXISTING ACTIVE SESSION
         // ----------------------------------------------------
 
         const existingSession = await pool.query(
-            `SELECT id, session_id
-             FROM user_sessions
-             WHERE user_id = $1
-               AND is_active = true
-             ORDER BY created_at DESC
-             LIMIT 1`,
-            [user.id]
+            `
+            SELECT
+                id,
+                session_id
+            FROM user_sessions
+            WHERE user_id = $1
+              AND is_active = true
+            ORDER BY created_at DESC
+            LIMIT 1
+            `,
+            [user.user_id]
         );
+
 
         if (existingSession.rows.length > 0) {
 
-            // Active session exists — return conflict so
-            // the frontend can show the "already logged in" popup
-
             return res.status(409).json({
 
-                message:
-                    "active_session_exists",
+                message: "active_session_exists",
 
                 existing_session_id:
                     existingSession.rows[0].session_id
@@ -148,52 +130,65 @@ const login = async (req, res) => {
 
 
         // ----------------------------------------------------
-        // CREATE JWT
+        // CREATE SESSION
         // ----------------------------------------------------
 
         const sessionId = uuidv4();
 
         const expiresAt = new Date(
-            Date.now() + 60 * 60 * 1000   // 1 hour
+            Date.now() + 60 * 60 * 1000
         );
-
-        const token =
-            jwt.sign(
-
-                {
-                    id:
-                        user.id,
-
-                    email:
-                        user.email,
-
-                    role:
-                        user.role,
-
-                    session_id:
-                        sessionId
-                },
-
-                process.env.JWT_SECRET,
-
-                {
-                    expiresIn:
-                        "1h"
-                }
-
-            );
 
 
         // ----------------------------------------------------
-        // RECORD SESSION IN user_sessions TABLE
+        // CREATE JWT
+        // ----------------------------------------------------
+
+        const token = jwt.sign(
+            {
+                id: user.user_id,
+                email: user.email_id,
+                role: user.role_name,
+                role_id: user.role_id,
+                session_id: sessionId
+            },
+            process.env.JWT_SECRET,
+            {
+                expiresIn: "1h"
+            }
+        );
+
+
+        // ----------------------------------------------------
+        // SAVE SESSION
         // ----------------------------------------------------
 
         await pool.query(
-            `INSERT INTO user_sessions
-                 (user_id, session_id, is_active, created_at, last_activity, expires_at)
-             VALUES
-                 ($1, $2, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $3)`,
-            [user.id, sessionId, expiresAt]
+            `
+            INSERT INTO user_sessions
+            (
+                user_id,
+                session_id,
+                is_active,
+                created_at,
+                last_activity,
+                expires_at
+            )
+            VALUES
+            (
+                $1,
+                $2,
+                true,
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP,
+                $3
+            )
+            `,
+            [
+                user.user_id,
+                sessionId,
+                expiresAt
+            ]
         );
 
 
@@ -203,27 +198,23 @@ const login = async (req, res) => {
 
         return res.status(200).json({
 
-            message:
-                "Login successful",
+            message: "Login successful",
 
             token,
 
             user: {
 
-                id:
-                    user.id,
+                id: user.user_id,
 
-                employee_code:
-                    user.employee_code,
+                name: user.user_name,
 
-                name:
-                    user.name,
+                phone: user.phone_number,
 
-                email:
-                    user.email,
+                email: user.email_id,
 
-                role:
-                    user.role
+                role: user.role_name,
+
+                role_id: user.role_id
 
             }
 
@@ -240,18 +231,15 @@ const login = async (req, res) => {
 
         return res.status(500).json({
 
-            message:
-                "Login failed",
+            message: "Login failed",
 
-            error:
-                error.message
+            error: error.message
 
         });
 
     }
 
 };
-
 
 // ============================================================
 // REGISTER
@@ -328,7 +316,7 @@ const register = async (req, res) => {
             await pool.query(
                 `
                 SELECT id
-                FROM users
+                FROM user_table
                 WHERE LOWER(email) = $1
                 `,
                 [normalizedEmail]
@@ -355,7 +343,7 @@ const register = async (req, res) => {
             await pool.query(
                 `
                 SELECT id
-                FROM users
+                FROM user_table
                 WHERE employee_code = $1
                 `,
                 [normalizedEmployeeCode]
@@ -392,7 +380,7 @@ const register = async (req, res) => {
         const result =
             await pool.query(
                 `
-                INSERT INTO users (
+                INSERT INTO user_table (
                     employee_code,
                     name,
                     email,
@@ -507,7 +495,7 @@ const forgotPassword = async (req, res) => {
                 SELECT
                     id,
                     email
-                FROM users
+                FROM user_table
                 WHERE LOWER(email) = $1
                 `,
                 [normalizedEmail]
@@ -572,7 +560,7 @@ const forgotPassword = async (req, res) => {
 
         await pool.query(
             `
-            UPDATE users
+            UPDATE user_table
             SET
                 password_reset_token_hash = $1,
                 password_reset_expires_at = $2
@@ -771,7 +759,7 @@ const resetPassword = async (req, res) => {
                 `
                 SELECT
                     id
-                FROM users
+                FROM user_table
                 WHERE
                     password_reset_token_hash = $1
                     AND password_reset_expires_at > NOW()
@@ -814,7 +802,7 @@ const resetPassword = async (req, res) => {
 
         await pool.query(
             `
-            UPDATE users
+            UPDATE user_table
             SET
                 password_hash = $1,
                 password_reset_token_hash = NULL,
@@ -927,3 +915,4 @@ module.exports = {
     forceLogoutSession
 
 };
+
