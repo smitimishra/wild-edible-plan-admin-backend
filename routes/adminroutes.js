@@ -30,6 +30,8 @@ const {
     updateSetting
 } = require("../controllers/settingscontroller");
 
+const { getHealth } = require("../controllers/healthcontroller");
+
 
 const authenticateToken =
     require("../middleware/authMiddleware");
@@ -40,6 +42,13 @@ const authorizeRoles =
 
 
 const router = express.Router();
+
+router.get(
+    "/health",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    getHealth
+);
 
 
 // ============================================================
