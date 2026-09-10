@@ -16,6 +16,14 @@ const {
 
 } = require("../controllers/admincontroller");
 
+const {
+    getSettings,
+    updateSetting
+} = require("../controllers/settingscontroller");
+
+const { getHealth } = require("../controllers/healthcontroller");
+
+
 const authenticateToken =
     require("../middleware/authMiddleware");
 
@@ -25,6 +33,13 @@ const authorizeRoles =
 
 
 const router = express.Router();
+
+router.get(
+    "/health",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    getHealth
+);
 
 
 // ============================================================
@@ -234,4 +249,26 @@ router.patch(
 );
 
 console.log("RESET PASSWORD ROUTE LOADED");
+
+// ============================================================
+// SYSTEM SETTINGS
+// ============================================================
+
+// GET ALL SETTINGS
+router.get(
+    "/settings",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    getSettings
+);
+
+// UPDATE A SETTING
+router.patch(
+    "/settings/:key",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    updateSetting
+);
+
+
 module.exports = router;

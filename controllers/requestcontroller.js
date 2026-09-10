@@ -2,7 +2,7 @@ const pool = require("../config/db");
 const fs = require("fs");
 const path = require("path");
 
-// HELPER - PARSE REQUEST DATA
+// HELPERS
 
 const parseRequestData = (requestData) => {
   if (!requestData) {
@@ -20,25 +20,133 @@ const parseRequestData = (requestData) => {
   }
 };
 
-// HELPER - NORMALIZE REQUEST DATA
+// GET AUTHENTICATED USER ID
+
+const getAuthenticatedUserId = (req) => {
+  return req?.user?.user_id ?? req?.user?.id ?? req?.user?.employee_id ?? null;
+};
+
+// GET USER FROM NEW user_table
+
+const getUserById = async (client, userId) => {
+  if (!userId) {
+    return null;
+  }
+
+  const result = await client.query(
+    `
+      SELECT
+        u.user_id,
+        u.role_id,
+        u.user_name,
+        u.phone_number,
+        u.email_id,
+        u.employee_code,
+        u.is_active,
+        u.approval_position_id,
+        u.approval_position,
+        r.role_name
+      FROM public.user_table u
+      LEFT JOIN public.role_table r
+        ON r.role_id = u.role_id
+      WHERE u.user_id = $1
+      LIMIT 1;
+    `,
+    [userId],
+  );
+
+  return result.rows.length > 0 ? result.rows[0] : null;
+};
+
+// NORMALIZE REQUEST
 
 const normalizeRequest = (request) => {
   const requestData = parseRequestData(request.request_data);
+
+  const employeeId =
+    requestData.employee_id ??
+    requestData.user_id ??
+    requestData.employeeId ??
+    request.employee_id ??
+    request.user_id ??
+    null;
+
+  const employeeName =
+    requestData.employee_name ??
+    requestData.user_name ??
+    requestData.employeeName ??
+    request.employee_name ??
+    request.user_name ??
+    "";
+
+  const employeeEmail =
+    requestData.employee_email ??
+    requestData.email_id ??
+    requestData.email ??
+    request.employee_email ??
+    request.email_id ??
+    "";
+
+  const requestType =
+    requestData.request_type ??
+    requestData.requestType ??
+    request.request_type ??
+    "PLANT";
+
+  const submittedAt =
+    requestData.submitted_at ??
+    requestData.created_at ??
+    request.submitted_at ??
+    request.created_at ??
+    null;
+
+  const updatedAt = requestData.updated_at ?? request.updated_at ?? null;
+
+  const completedAt = requestData.completed_at ?? request.completed_at ?? null;
 
   return {
     ...request,
 
     request_data: requestData,
 
-    plant_name: requestData.plant_name || "",
+    employee_id: employeeId,
+    employee_name: employeeName,
+    employee_email: employeeEmail,
 
-    common_name: requestData.common_name || "",
+    request_type: requestType,
 
-    scientific_name: requestData.scientific_name || "",
+    submitted_at: submittedAt,
+    updated_at: updatedAt,
+    completed_at: completedAt,
 
-    description: requestData.description || "",
+    plant_name: requestData.plant_name ?? requestData.plantName ?? "",
 
-    comments: requestData.comments || "",
+    common_name: requestData.common_name ?? requestData.commonName ?? "",
+
+    scientific_name:
+      requestData.scientific_name ?? requestData.scientificName ?? "",
+
+    description: requestData.description ?? "",
+
+    family: requestData.family ?? "",
+
+    habitat: requestData.habitat ?? "",
+
+    distribution: requestData.distribution ?? "",
+
+    edible_parts: requestData.edible_parts ?? "",
+
+    nutritional_value: requestData.nutritional_value ?? "",
+
+    flowering_season: requestData.flowering_season ?? "",
+
+    conservation_status: requestData.conservation_status ?? "",
+
+    latitude: requestData.latitude ?? null,
+
+    longitude: requestData.longitude ?? null,
+
+    comments: requestData.comments ?? "",
   };
 };
 
@@ -50,7 +158,7 @@ const createRequest = async (req, res) => {
   let transactionStarted = false;
 
   try {
-    const employeeId = req.user.id;
+    const employeeId = getAuthenticatedUserId(req);
 
     if (!employeeId) {
       return res.status(401).json({
@@ -58,9 +166,23 @@ const createRequest = async (req, res) => {
       });
     }
 
-    const { request_type } = req.body;
+    // GET EMPLOYEE FROM NEW DATABASE
 
-    // Parse request_data
+    const employee = await getUserById(client, employeeId);
+
+    if (!employee) {
+      return res.status(404).json({
+        message: "Employee not found in user_table",
+      });
+    }
+
+    if (employee.is_active === false) {
+      return res.status(403).json({
+        message: "Employee account is inactive",
+      });
+    }
+
+    // REQUEST DATA
 
     let parsedRequestData = {};
 
@@ -72,18 +194,19 @@ const createRequest = async (req, res) => {
       });
     }
 
-    // Plant information
+    const requestType =
+      req.body.request_type || parsedRequestData.request_type || "PLANT";
 
-    const plantName = req.body.plant_name || parsedRequestData.plant_name;
+    const plantName =
+      req.body.plant_name ||
+      parsedRequestData.plant_name ||
+      parsedRequestData.plantName;
 
     const commonName =
-      req.body.common_name || parsedRequestData.common_name || null;
-
-    if (!request_type) {
-      return res.status(400).json({
-        message: "request_type is required",
-      });
-    }
+      req.body.common_name ||
+      parsedRequestData.common_name ||
+      parsedRequestData.commonName ||
+      null;
 
     if (!plantName) {
       return res.status(400).json({
@@ -91,15 +214,25 @@ const createRequest = async (req, res) => {
       });
     }
 
+    // ADD EMPLOYEE INFORMATION INTO request_data
+
     parsedRequestData = {
       ...parsedRequestData,
 
-      plant_name: plantName,
+      request_type: requestType,
 
+      employee_id: employee.user_id,
+      employee_name: employee.user_name,
+      employee_email: employee.email_id,
+      employee_code: employee.employee_code,
+
+      plant_name: plantName,
       common_name: commonName,
+
+      submitted_at: new Date().toISOString(),
     };
 
-    // Uploaded files
+    // FILES
 
     const files = req.files || [];
 
@@ -115,41 +248,42 @@ const createRequest = async (req, res) => {
       });
     }
 
-    // Generate request number
+    // REQUEST NUMBER
 
     const requestNumber = "REQ-" + Date.now();
 
-    // Start transaction
+    // START TRANSACTION
 
     await client.query("BEGIN");
 
     transactionStarted = true;
 
-    // CREATE APPROVAL REQUEST
+    // INSERT INTO approval_requests
+    //
+    // Current schema:
+    // id
+    // request_number
+    // status
+    // current_approval_level
+    // request_data
 
     const requestResult = await client.query(
       `
-                INSERT INTO approval_requests (
-                    request_number,
-                    employee_id,
-                    request_type,
-                    request_data,
-                    status,
-                    current_approval_level,
-                    submitted_at
-                )
-                VALUES (
-                    $1,
-                    $2,
-                    $3,
-                    $4,
-                    'PENDING_MANAGER',
-                    1,
-                    CURRENT_TIMESTAMP
-                )
-                RETURNING *;
-                `,
-      [requestNumber, employeeId, request_type, parsedRequestData],
+        INSERT INTO public.approval_requests (
+          request_number,
+          status,
+          current_approval_level,
+          request_data
+        )
+        VALUES (
+          $1,
+          'PENDING_REVIEWER',
+          1,
+          $2::jsonb
+        )
+        RETURNING *;
+      `,
+      [requestNumber, JSON.stringify(parsedRequestData)],
     );
 
     const request = requestResult.rows[0];
@@ -161,21 +295,21 @@ const createRequest = async (req, res) => {
 
       await client.query(
         `
-                INSERT INTO request_attachments (
-                    request_id,
-                    file_name,
-                    file_path,
-                    mime_type,
-                    file_size
-                )
-                VALUES (
-                    $1,
-                    $2,
-                    $3,
-                    $4,
-                    $5
-                );
-                `,
+          INSERT INTO public.request_attachments (
+            request_id,
+            file_name,
+            file_path,
+            mime_type,
+            file_size
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5
+          );
+        `,
         [request.id, file.originalname, filePath, file.mimetype, file.size],
       );
     }
@@ -195,17 +329,13 @@ const createRequest = async (req, res) => {
 
       plant: {
         plant_name: plantName,
-
         common_name: commonName,
       },
 
       attachments: files.map((file) => ({
         file_name: file.originalname,
-
         file_path: `/uploads/requests/${file.filename}`,
-
         mime_type: file.mimetype,
-
         file_size: file.size,
       })),
     });
@@ -232,7 +362,6 @@ const createRequest = async (req, res) => {
 
     return res.status(500).json({
       message: "Failed to create plant request",
-
       error: error.message,
     });
   } finally {
@@ -240,11 +369,10 @@ const createRequest = async (req, res) => {
   }
 };
 
-// ============================================================
-// MANAGER APPROVE REQUEST
-// ============================================================
+// REVIEWER APPROVE REQUEST
+// EMPLOYEE -> REVIEWER -> HR
 
-const managerApproveRequest = async (req, res) => {
+const reviewerApproveRequest = async (req, res) => {
   const client = await pool.connect();
 
   let transactionStarted = false;
@@ -252,17 +380,17 @@ const managerApproveRequest = async (req, res) => {
   try {
     const requestId = req.params.id;
 
-    const managerId = req.user.id;
+    const reviewerId = getAuthenticatedUserId(req);
 
-    if (!managerId) {
+    if (!reviewerId) {
       return res.status(401).json({
-        message: "Authenticated manager not found",
+        message: "Authenticated reviewer not found",
       });
     }
 
     const scientificName = req.body.scientific_name || null;
 
-    const description = req.body.description || null;
+    const description = req.body.description ?? null;
 
     const comments = req.body.comments || null;
 
@@ -272,21 +400,35 @@ const managerApproveRequest = async (req, res) => {
       });
     }
 
+    // VERIFY REVIEWER
+
+    const reviewer = await getUserById(client, reviewerId);
+
+    if (!reviewer) {
+      return res.status(404).json({
+        message: "Reviewer not found in user_table",
+      });
+    }
+
+    if (reviewer.is_active === false) {
+      return res.status(403).json({
+        message: "Reviewer account is inactive",
+      });
+    }
+
     await client.query("BEGIN");
 
     transactionStarted = true;
 
-    // ========================================================
-    // FIND REQUEST
-    // ========================================================
+    // GET REQUEST
 
     const requestResult = await client.query(
       `
-                SELECT *
-                FROM approval_requests
-                WHERE id = $1
-                FOR UPDATE;
-                `,
+        SELECT *
+        FROM public.approval_requests
+        WHERE id = $1
+        FOR UPDATE;
+      `,
       [requestId],
     );
 
@@ -302,35 +444,33 @@ const managerApproveRequest = async (req, res) => {
 
     const request = requestResult.rows[0];
 
-    // ========================================================
     // CHECK STATUS
-    // ========================================================
 
-    if (request.status !== "PENDING_MANAGER") {
+    if (request.status !== "PENDING_REVIEWER") {
       await client.query("ROLLBACK");
 
       transactionStarted = false;
 
       return res.status(400).json({
-        message: "Request is not pending manager approval",
+        message: "Request is not pending reviewer approval",
       });
     }
 
-    // ========================================================
-    // EXISTING REQUEST DATA
-    // ========================================================
+    // REQUEST DATA
 
     let existingRequestData = {};
 
     try {
       existingRequestData = parseRequestData(request.request_data);
     } catch (error) {
-      existingRequestData = {};
-    }
+      await client.query("ROLLBACK");
 
-    // ========================================================
-    // UPDATE REQUEST DATA
-    // ========================================================
+      transactionStarted = false;
+
+      return res.status(400).json({
+        message: "Request contains invalid request data",
+      });
+    }
 
     const updatedRequestData = {
       ...existingRequestData,
@@ -338,67 +478,72 @@ const managerApproveRequest = async (req, res) => {
       scientific_name: scientificName,
 
       description: description,
+
+      reviewer_id: reviewer.user_id,
+
+      reviewer_name: reviewer.user_name,
+
+      reviewer_email: reviewer.email_id,
+
+      reviewer_approved_at: new Date().toISOString(),
     };
 
-    // ========================================================
     // APPROVAL HISTORY
-    // ========================================================
 
     await client.query(
       `
-            INSERT INTO approval_history (
-                request_id,
-                approver_id,
-                approval_level,
-                action,
-                comments
-            )
-            VALUES (
-                $1,
-                $2,
-                1,
-                'APPROVED',
-                $3
-            );
-            `,
-      [requestId, managerId, comments],
+        INSERT INTO public.approval_history (
+          request_id,
+          approver_id,
+          approval_level,
+          action,
+          comments
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          'APPROVED',
+          $4
+        );
+      `,
+      [requestId, reviewerId, 1, comments],
     );
 
-    // ========================================================
     // UPDATE REQUEST
-    // ========================================================
 
     const updateResult = await client.query(
       `
-                UPDATE approval_requests
-                SET
-                    request_data = $1,
-                    status = 'PENDING_HR',
-                    current_approval_level = 2,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = $2
-                RETURNING *;
-                `,
-      [updatedRequestData, requestId],
+          UPDATE public.approval_requests
+          SET
+            request_data = $1::jsonb,
+            status = 'PENDING_HR',
+            current_approval_level = 2
+          WHERE id = $2
+          RETURNING *;
+        `,
+      [JSON.stringify(updatedRequestData), requestId],
     );
+
+    // COMMIT
 
     await client.query("COMMIT");
 
     transactionStarted = false;
 
     return res.status(200).json({
-      message: "Plant approved by manager and sent to HR",
+      message: "Plant approved by reviewer and sent to HR",
 
       request: normalizeRequest(updateResult.rows[0]),
 
       plant_details: {
-        plant_name: updatedRequestData.plant_name,
+        plant_name: updatedRequestData.plant_name || "",
 
-        common_name: updatedRequestData.common_name,
+        common_name: updatedRequestData.common_name || "",
 
-        scientific_name: updatedRequestData.scientific_name,
+        scientific_name: updatedRequestData.scientific_name || "",
 
-        description: updatedRequestData.description,
+        description: updatedRequestData.description || "",
       },
     });
   } catch (error) {
@@ -410,10 +555,10 @@ const managerApproveRequest = async (req, res) => {
       }
     }
 
-    console.error("Manager approval error:", error);
+    console.error("Reviewer approval error:", error);
 
     return res.status(500).json({
-      message: "Failed to approve plant",
+      message: "Failed to approve plant by reviewer",
 
       error: error.message,
     });
@@ -422,9 +567,8 @@ const managerApproveRequest = async (req, res) => {
   }
 };
 
-// ============================================================
 // HR APPROVE REQUEST
-// ============================================================
+// REVIEWER -> HR -> APPROVED
 
 const hrApproveRequest = async (req, res) => {
   const client = await pool.connect();
@@ -434,7 +578,7 @@ const hrApproveRequest = async (req, res) => {
   try {
     const requestId = req.params.id;
 
-    const hrId = req.user.id;
+    const hrId = getAuthenticatedUserId(req);
 
     const comments = req.body.comments || null;
 
@@ -444,21 +588,35 @@ const hrApproveRequest = async (req, res) => {
       });
     }
 
+    // VERIFY HR USER
+
+    const hrUser = await getUserById(client, hrId);
+
+    if (!hrUser) {
+      return res.status(404).json({
+        message: "HR user not found in user_table",
+      });
+    }
+
+    if (hrUser.is_active === false) {
+      return res.status(403).json({
+        message: "HR account is inactive",
+      });
+    }
+
     await client.query("BEGIN");
 
     transactionStarted = true;
 
-    // ========================================================
-    // FIND REQUEST
-    // ========================================================
+    // GET REQUEST
 
     const requestResult = await client.query(
       `
-                SELECT *
-                FROM approval_requests
-                WHERE id = $1
-                FOR UPDATE;
-                `,
+          SELECT *
+          FROM public.approval_requests
+          WHERE id = $1
+          FOR UPDATE;
+        `,
       [requestId],
     );
 
@@ -474,9 +632,7 @@ const hrApproveRequest = async (req, res) => {
 
     const request = requestResult.rows[0];
 
-    // ========================================================
     // CHECK STATUS
-    // ========================================================
 
     if (request.status !== "PENDING_HR") {
       await client.query("ROLLBACK");
@@ -488,9 +644,7 @@ const hrApproveRequest = async (req, res) => {
       });
     }
 
-    // ========================================================
-    // GET REQUEST DATA
-    // ========================================================
+    // REQUEST DATA
 
     let requestData = {};
 
@@ -506,17 +660,15 @@ const hrApproveRequest = async (req, res) => {
       });
     }
 
-    const plantName = requestData.plant_name;
+    const plantName = requestData.plant_name || requestData.plantName || null;
 
-    const commonName = requestData.common_name || null;
+    const commonName =
+      requestData.common_name || requestData.commonName || null;
 
-    const scientificName = requestData.scientific_name || null;
+    const scientificName =
+      requestData.scientific_name || requestData.scientificName || null;
 
     const description = requestData.description || null;
-
-    // ========================================================
-    // VALIDATION
-    // ========================================================
 
     if (!plantName) {
       await client.query("ROLLBACK");
@@ -535,104 +687,163 @@ const hrApproveRequest = async (req, res) => {
 
       return res.status(400).json({
         message:
-          "scientific_name must be provided by the manager before HR approval",
+          "scientific_name must be provided by the reviewer before HR approval",
       });
     }
 
-    // ========================================================
-    // HR APPROVAL HISTORY
-    // ========================================================
+    // GET ATTACHMENTS
+
+    const attachmentsResult = await client.query(
+      `
+          SELECT
+            id,
+            request_id,
+            file_name,
+            file_path,
+            mime_type,
+            file_size,
+            image_type
+          FROM public.request_attachments
+          WHERE request_id = $1
+          ORDER BY id ASC;
+        `,
+      [requestId],
+    );
+
+    const firstAttachment =
+      attachmentsResult.rows.length > 0 ? attachmentsResult.rows[0] : null;
+
+    // APPROVAL HISTORY
 
     await client.query(
       `
-            INSERT INTO approval_history (
-                request_id,
-                approver_id,
-                approval_level,
-                action,
-                comments
-            )
-            VALUES (
-                $1,
-                $2,
-                2,
-                'APPROVED',
-                $3
-            );
-            `,
-      [requestId, hrId, comments],
+        INSERT INTO public.approval_history (
+          request_id,
+          approver_id,
+          approval_level,
+          action,
+          comments
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          'APPROVED',
+          $4
+        );
+      `,
+      [requestId, hrId, 2, comments],
     );
 
-    // ========================================================
-    // INSERT PERMANENT PLANT
-    // ========================================================
+    // INSERT INTO plant_table
+    //
+    // New main plant table
 
     const plantResult = await client.query(
       `
-                INSERT INTO plant_details (
-                    request_id,
-                    plant_name,
-                    common_name,
-                    scientific_name,
-                    description
-                )
-                VALUES (
-                    $1,
-                    $2,
-                    $3,
-                    $4,
-                    $5
-                )
-                RETURNING *;
-                `,
-      [requestId, plantName, commonName, scientificName, description],
+          INSERT INTO public.plant_table (
+            image_id,
+            scientific_name,
+            common_name,
+            family,
+            habitat,
+            distribution,
+            edible_parts,
+            nutritional_value,
+            flowering_season,
+            conservation_status,
+            image_url,
+            latitude,
+            longitude,
+            uploaded_by,
+            verified_status,
+            created_date
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            $8,
+            $9,
+            $10,
+            $11,
+            $12,
+            $13,
+            $14,
+            TRUE,
+            CURRENT_TIMESTAMP
+          )
+          RETURNING *;
+        `,
+      [
+        firstAttachment ? Number(firstAttachment.id) : null,
+
+        scientificName,
+
+        commonName,
+
+        requestData.family || null,
+
+        requestData.habitat || null,
+
+        requestData.distribution || null,
+
+        requestData.edible_parts || null,
+
+        requestData.nutritional_value || null,
+
+        requestData.flowering_season || null,
+
+        requestData.conservation_status || null,
+
+        firstAttachment
+          ? firstAttachment.file_path
+          : requestData.image_url || null,
+
+        requestData.latitude ?? null,
+
+        requestData.longitude ?? null,
+
+        requestData.employee_id || requestData.user_id || null,
+      ],
     );
 
-    // ========================================================
-    // MARK REQUEST APPROVED
-    // ========================================================
+    // UPDATE REQUEST TO APPROVED
+
+    const updatedRequestData = {
+      ...requestData,
+
+      hr_id: hrUser.user_id,
+
+      hr_name: hrUser.user_name,
+
+      hr_email: hrUser.email_id,
+
+      hr_approved_at: new Date().toISOString(),
+    };
 
     const updateResult = await client.query(
       `
-                UPDATE approval_requests
-                SET
-                    status = 'APPROVED',
-                    current_approval_level = 3,
-                    completed_at = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = $1
-                RETURNING *;
-                `,
-      [requestId],
+          UPDATE public.approval_requests
+          SET
+            request_data = $1::jsonb,
+            status = 'APPROVED',
+            current_approval_level = 3
+          WHERE id = $2
+          RETURNING *;
+        `,
+      [JSON.stringify(updatedRequestData), requestId],
     );
+
+    // COMMIT
 
     await client.query("COMMIT");
 
     transactionStarted = false;
-
-    // ========================================================
-    // GET ATTACHMENTS
-    //
-    // IMPORTANT:
-    // request_attachments does NOT use created_at.
-    // Use id for ordering.
-    // ========================================================
-
-    const attachmentsResult = await pool.query(
-      `
-                SELECT
-                    id,
-                    request_id,
-                    file_name,
-                    file_path,
-                    mime_type,
-                    file_size
-                FROM request_attachments
-                WHERE request_id = $1
-                ORDER BY id ASC;
-                `,
-      [requestId],
-    );
 
     return res.status(200).json({
       message: "Plant approved by HR and permanently stored",
@@ -664,9 +875,13 @@ const hrApproveRequest = async (req, res) => {
   }
 };
 
-// ============================================================
 // REJECT REQUEST
-// ============================================================
+//
+// Reviewer:
+// PENDING_REVIEWER -> REJECTED
+//
+// HR:
+// PENDING_HR -> REJECTED
 
 const rejectRequest = async (req, res) => {
   const client = await pool.connect();
@@ -676,7 +891,7 @@ const rejectRequest = async (req, res) => {
   try {
     const requestId = req.params.id;
 
-    const approverId = req.user.id;
+    const approverId = getAuthenticatedUserId(req);
 
     const comments = req.body.comments;
 
@@ -686,9 +901,19 @@ const rejectRequest = async (req, res) => {
       });
     }
 
-    if (!comments) {
+    if (!comments || !String(comments).trim()) {
       return res.status(400).json({
         message: "comments are required when rejecting a request",
+      });
+    }
+
+    // VERIFY USER
+
+    const approver = await getUserById(client, approverId);
+
+    if (!approver) {
+      return res.status(404).json({
+        message: "Approver not found in user_table",
       });
     }
 
@@ -696,17 +921,15 @@ const rejectRequest = async (req, res) => {
 
     transactionStarted = true;
 
-    // ========================================================
-    // FIND REQUEST
-    // ========================================================
+    // GET REQUEST
 
     const requestResult = await client.query(
       `
-                SELECT *
-                FROM approval_requests
-                WHERE id = $1
-                FOR UPDATE;
-                `,
+          SELECT *
+          FROM public.approval_requests
+          WHERE id = $1
+          FOR UPDATE;
+        `,
       [requestId],
     );
 
@@ -722,13 +945,11 @@ const rejectRequest = async (req, res) => {
 
     const request = requestResult.rows[0];
 
-    // ========================================================
     // DETERMINE APPROVAL LEVEL
-    // ========================================================
 
     let approvalLevel;
 
-    if (request.status === "PENDING_MANAGER") {
+    if (request.status === "PENDING_REVIEWER") {
       approvalLevel = 1;
     } else if (request.status === "PENDING_HR") {
       approvalLevel = 2;
@@ -742,45 +963,64 @@ const rejectRequest = async (req, res) => {
       });
     }
 
-    // ========================================================
-    // RECORD REJECTION
-    // ========================================================
+    // REQUEST DATA
+
+    let requestData = {};
+
+    try {
+      requestData = parseRequestData(request.request_data);
+    } catch (error) {
+      requestData = {};
+    }
+
+    const updatedRequestData = {
+      ...requestData,
+
+      rejected_by: approver.user_id,
+
+      rejected_by_name: approver.user_name,
+
+      rejected_by_email: approver.email_id,
+
+      rejection_comments: comments,
+
+      rejected_at: new Date().toISOString(),
+    };
+
+    // APPROVAL HISTORY
 
     await client.query(
       `
-            INSERT INTO approval_history (
-                request_id,
-                approver_id,
-                approval_level,
-                action,
-                comments
-            )
-            VALUES (
-                $1,
-                $2,
-                $3,
-                'REJECTED',
-                $4
-            );
-            `,
+        INSERT INTO public.approval_history (
+          request_id,
+          approver_id,
+          approval_level,
+          action,
+          comments
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          'REJECTED',
+          $4
+        );
+      `,
       [requestId, approverId, approvalLevel, comments],
     );
 
-    // ========================================================
     // UPDATE REQUEST
-    // ========================================================
 
     const updateResult = await client.query(
       `
-                UPDATE approval_requests
-                SET
-                    status = 'REJECTED',
-                    completed_at = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = $1
-                RETURNING *;
-                `,
-      [requestId],
+          UPDATE public.approval_requests
+          SET
+            request_data = $1::jsonb,
+            status = 'REJECTED'
+          WHERE id = $2
+          RETURNING *;
+        `,
+      [JSON.stringify(updatedRequestData), requestId],
     );
 
     await client.query("COMMIT");
@@ -813,34 +1053,21 @@ const rejectRequest = async (req, res) => {
   }
 };
 
-// ============================================================
 // GET ALL REQUESTS
-// ============================================================
 
 const getAllRequests = async (req, res) => {
   try {
     const result = await pool.query(
       `
-                SELECT
-                    ar.id,
-                    ar.request_number,
-                    ar.employee_id,
-                    u.name AS employee_name,
-                    u.email AS employee_email,
-                    ar.request_type,
-                    ar.request_data,
-                    ar.status,
-                    ar.current_approval_level,
-                    ar.submitted_at,
-                    ar.completed_at,
-                    ar.updated_at
-                FROM approval_requests ar
-                JOIN users u
-                    ON u.id = ar.employee_id
-                ORDER BY
-                    ar.submitted_at DESC NULLS LAST,
-                    ar.id DESC;
-                `,
+          SELECT
+            ar.id,
+            ar.request_number,
+            ar.request_data,
+            ar.status,
+            ar.current_approval_level
+          FROM public.approval_requests ar
+          ORDER BY ar.id DESC;
+        `,
     );
 
     const requests = result.rows.map(normalizeRequest);
@@ -863,48 +1090,38 @@ const getAllRequests = async (req, res) => {
   }
 };
 
-// GET PENDING MANAGER REQUESTS
+// GET PENDING REVIEWER REQUESTS
 
-const getPendingManagerRequests = async (req, res) => {
+const getPendingReviewerRequests = async (req, res) => {
   try {
     const result = await pool.query(
       `
-                SELECT
-                    ar.id,
-                    ar.request_number,
-                    ar.employee_id,
-                    u.name AS employee_name,
-                    u.email AS employee_email,
-                    ar.request_type,
-                    ar.request_data,
-                    ar.status,
-                    ar.current_approval_level,
-                    ar.submitted_at,
-                    ar.updated_at
-                FROM approval_requests ar
-                JOIN users u
-                    ON u.id = ar.employee_id
-                WHERE ar.status = 'PENDING_MANAGER'
-                ORDER BY
-                    ar.submitted_at ASC NULLS LAST,
-                    ar.id ASC;
-                `,
+          SELECT
+            ar.id,
+            ar.request_number,
+            ar.request_data,
+            ar.status,
+            ar.current_approval_level
+          FROM public.approval_requests ar
+          WHERE ar.status = 'PENDING_REVIEWER'
+          ORDER BY ar.id ASC;
+        `,
     );
 
     const requests = result.rows.map(normalizeRequest);
 
     return res.status(200).json({
-      message: "Pending manager requests retrieved successfully",
+      message: "Pending reviewer requests retrieved successfully",
 
       count: requests.length,
 
       requests,
     });
   } catch (error) {
-    console.error("Get pending manager requests error:", error);
+    console.error("Get pending reviewer requests error:", error);
 
     return res.status(500).json({
-      message: "Failed to retrieve manager requests",
+      message: "Failed to retrieve reviewer requests",
 
       error: error.message,
     });
@@ -917,26 +1134,16 @@ const getPendingHRRequests = async (req, res) => {
   try {
     const result = await pool.query(
       `
-                SELECT
-                    ar.id,
-                    ar.request_number,
-                    ar.employee_id,
-                    u.name AS employee_name,
-                    u.email AS employee_email,
-                    ar.request_type,
-                    ar.request_data,
-                    ar.status,
-                    ar.current_approval_level,
-                    ar.submitted_at,
-                    ar.updated_at
-                FROM approval_requests ar
-                JOIN users u
-                    ON u.id = ar.employee_id
-                WHERE ar.status = 'PENDING_HR'
-                ORDER BY
-                    ar.submitted_at ASC NULLS LAST,
-                    ar.id ASC;
-                `,
+          SELECT
+            ar.id,
+            ar.request_number,
+            ar.request_data,
+            ar.status,
+            ar.current_approval_level
+          FROM public.approval_requests ar
+          WHERE ar.status = 'PENDING_HR'
+          ORDER BY ar.id ASC;
+        `,
     );
 
     const requests = result.rows.map(normalizeRequest);
@@ -959,34 +1166,63 @@ const getPendingHRRequests = async (req, res) => {
   }
 };
 
+// GET APPROVED REQUESTS
+
+const getApprovedRequests = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+          SELECT
+            ar.id,
+            ar.request_number,
+            ar.request_data,
+            ar.status,
+            ar.current_approval_level
+          FROM public.approval_requests ar
+          WHERE ar.status = 'APPROVED'
+          ORDER BY ar.id DESC;
+        `,
+    );
+
+    const requests = result.rows.map(normalizeRequest);
+
+    return res.status(200).json({
+      message: "Approved requests retrieved successfully",
+
+      count: requests.length,
+
+      requests,
+    });
+  } catch (error) {
+    console.error("Get approved requests error:", error);
+
+    return res.status(500).json({
+      message: "Failed to retrieve approved requests",
+
+      error: error.message,
+    });
+  }
+};
+
 // GET REQUEST BY ID
 
 const getRequestById = async (req, res) => {
   try {
     const requestId = req.params.id;
 
-    // 1. REQUEST
+    // REQUEST
 
     const requestResult = await pool.query(
       `
-                SELECT
-                    ar.id,
-                    ar.request_number,
-                    ar.employee_id,
-                    u.name AS employee_name,
-                    u.email AS employee_email,
-                    ar.request_type,
-                    ar.request_data,
-                    ar.status,
-                    ar.current_approval_level,
-                    ar.submitted_at,
-                    ar.completed_at,
-                    ar.updated_at
-                FROM approval_requests ar
-                LEFT JOIN users u
-                    ON u.id = ar.employee_id
-                WHERE ar.id = $1;
-                `,
+          SELECT
+            ar.id,
+            ar.request_number,
+            ar.request_data,
+            ar.status,
+            ar.current_approval_level
+          FROM public.approval_requests ar
+          WHERE ar.id = $1;
+        `,
       [requestId],
     );
 
@@ -998,82 +1234,100 @@ const getRequestById = async (req, res) => {
 
     const request = normalizeRequest(requestResult.rows[0]);
 
-    // 2. ATTACHMENTS
-    //
-    // IMPORTANT:
-    // There is no created_at here.
-    // We use id for ordering.
+    // ATTACHMENTS
 
     const attachmentsResult = await pool.query(
       `
-                SELECT
-                    id,
-                    request_id,
-                    file_name,
-                    file_path,
-                    mime_type,
-                    file_size
-                FROM request_attachments
-                WHERE request_id = $1
-                ORDER BY id ASC;
-                `,
+          SELECT
+            id,
+            request_id,
+            file_name,
+            file_path,
+            mime_type,
+            file_size,
+            image_type
+          FROM public.request_attachments
+          WHERE request_id = $1
+          ORDER BY id ASC;
+        `,
       [requestId],
     );
 
-    // ========================================================
-    // 3. APPROVAL HISTORY
-    // ========================================================
+    // APPROVAL HISTORY
 
     const historyResult = await pool.query(
       `
-                SELECT
-                    ah.id,
-                    ah.request_id,
-                    ah.approval_level,
-                    ah.action,
-                    ah.comments,
-                    ah.action_at,
-                    u.id AS approver_id,
-                    u.name AS approver_name,
-                    u.role AS approver_role
-                FROM approval_history ah
-                LEFT JOIN users u
-                    ON u.id = ah.approver_id
-                WHERE ah.request_id = $1
-                ORDER BY
-                    ah.approval_level ASC,
-                    ah.action_at ASC;
-                `,
+          SELECT
+            ah.id,
+            ah.request_id,
+            ah.approver_id,
+            ah.approval_level,
+            ah.action,
+            ah.comments,
+            ah.action_at,
+
+            u.user_id,
+            u.user_name AS approver_name,
+            u.email_id AS approver_email,
+            u.employee_code,
+            u.role_id,
+
+            r.role_name AS approver_role
+
+          FROM public.approval_history ah
+
+          LEFT JOIN public.user_table u
+            ON u.user_id = ah.approver_id
+
+          LEFT JOIN public.role_table r
+            ON r.role_id = u.role_id
+
+          WHERE ah.request_id = $1
+
+          ORDER BY
+            ah.approval_level ASC,
+            ah.action_at ASC;
+        `,
       [requestId],
     );
 
-    // ========================================================
-    // 4. PERMANENT PLANT DETAILS
+    // PLANT DETAILS
     //
-    // Do NOT select created_at / updated_at because those
-    // columns are not part of the schema currently being used.
-    // ========================================================
+    // There is no plant_details table anymore.
+    //
+    // For an approved request, request_data contains
+    // the plant information.
 
-    const plantResult = await pool.query(
-      `
-                SELECT
-                    id,
-                    request_id,
-                    plant_name,
-                    common_name,
-                    scientific_name,
-                    description
-                FROM plant_details
-                WHERE request_id = $1
-                ORDER BY id DESC
-                LIMIT 1;
-                `,
-      [requestId],
-    );
+    const plantDetails =
+      request.status === "APPROVED"
+        ? {
+            plant_name: request.plant_name,
 
-    // ========================================================
-    // 5. RESPONSE
-    // ========================================================
+            common_name: request.common_name,
+
+            scientific_name: request.scientific_name,
+
+            description: request.description,
+
+            family: request.family,
+
+            habitat: request.habitat,
+
+            distribution: request.distribution,
+
+            edible_parts: request.edible_parts,
+
+            nutritional_value: request.nutritional_value,
+
+            flowering_season: request.flowering_season,
+
+            conservation_status: request.conservation_status,
+
+            latitude: request.latitude,
+
+            longitude: request.longitude,
+          }
+        : null;
 
     return res.status(200).json({
       message: "Request details retrieved successfully",
@@ -1084,10 +1338,12 @@ const getRequestById = async (req, res) => {
 
       approval_history: historyResult.rows,
 
-      plant_details: plantResult.rows.length > 0 ? plantResult.rows[0] : null,
+      plant_details: plantDetails,
 
-      // These are also provided at the top level so that
-      // either frontend response style can work.
+      // ------------------------------------------------------
+      // TOP LEVEL COMPATIBILITY FIELDS
+      // ------------------------------------------------------
+
       id: request.id,
 
       request_number: request.request_number,
@@ -1131,9 +1387,7 @@ const getRequestById = async (req, res) => {
   }
 };
 
-// ============================================================
 // DOWNLOAD ATTACHMENT
-// ============================================================
 
 const downloadAttachment = async (req, res) => {
   try {
@@ -1141,15 +1395,15 @@ const downloadAttachment = async (req, res) => {
 
     const result = await pool.query(
       `
-                SELECT
-                    id,
-                    request_id,
-                    file_name,
-                    file_path,
-                    mime_type
-                FROM request_attachments
-                WHERE id = $1;
-                `,
+          SELECT
+            id,
+            request_id,
+            file_name,
+            file_path,
+            mime_type
+          FROM public.request_attachments
+          WHERE id = $1;
+        `,
       [attachmentId],
     );
 
@@ -1160,6 +1414,12 @@ const downloadAttachment = async (req, res) => {
     }
 
     const attachment = result.rows[0];
+
+    if (!attachment.file_path) {
+      return res.status(404).json({
+        message: "Attachment file path not found",
+      });
+    }
 
     const relativeFilePath = attachment.file_path.replace(/^[/\\]+/, "");
 
@@ -1189,13 +1449,11 @@ const downloadAttachment = async (req, res) => {
   }
 };
 
-// ============================================================
 // GET MY REQUESTS - EMPLOYEE
-// ============================================================
 
 const getMyRequests = async (req, res) => {
   try {
-    const employeeId = req.user.id;
+    const employeeId = getAuthenticatedUserId(req);
 
     if (!employeeId) {
       return res.status(401).json({
@@ -1205,28 +1463,21 @@ const getMyRequests = async (req, res) => {
 
     const result = await pool.query(
       `
-                SELECT
-                    ar.id,
-                    ar.request_number,
-                    ar.employee_id,
-                    u.name AS employee_name,
-                    u.email AS employee_email,
-                    ar.request_type,
-                    ar.request_data,
-                    ar.status,
-                    ar.current_approval_level,
-                    ar.submitted_at,
-                    ar.completed_at,
-                    ar.updated_at
-                FROM approval_requests ar
-                INNER JOIN users u
-                    ON ar.employee_id = u.id
-                WHERE ar.employee_id = $1
-                ORDER BY
-                    ar.submitted_at DESC NULLS LAST,
-                    ar.id DESC;
-                `,
-      [employeeId],
+          SELECT
+            ar.id,
+            ar.request_number,
+            ar.request_data,
+            ar.status,
+            ar.current_approval_level
+          FROM public.approval_requests ar
+          WHERE
+            COALESCE(
+              ar.request_data ->> 'employee_id',
+              ar.request_data ->> 'user_id'
+            ) = $1::text
+          ORDER BY ar.id DESC;
+        `,
+      [String(employeeId)],
     );
 
     const requests = result.rows.map(normalizeRequest);
@@ -1249,18 +1500,12 @@ const getMyRequests = async (req, res) => {
   }
 };
 
-// ============================================================
 // ADD ATTACHMENT
-// MANAGER / HR
-// ============================================================
+// REVIEWER / HR
 
 const addAttachment = async (req, res) => {
   try {
     const requestId = req.params.id;
-
-    // --------------------------------------------------------
-    // Validate request ID
-    // --------------------------------------------------------
 
     if (!requestId) {
       return res.status(400).json({
@@ -1268,28 +1513,22 @@ const addAttachment = async (req, res) => {
       });
     }
 
-    // --------------------------------------------------------
-    // Validate file
-    // --------------------------------------------------------
-
     if (!req.file) {
       return res.status(400).json({
         message: "Image file is required",
       });
     }
 
-    // --------------------------------------------------------
-    // Check request
-    // --------------------------------------------------------
+    // CHECK REQUEST
 
     const requestResult = await pool.query(
       `
-                SELECT
-                    id,
-                    status
-                FROM approval_requests
-                WHERE id = $1;
-                `,
+          SELECT
+            id,
+            status
+          FROM public.approval_requests
+          WHERE id = $1;
+        `,
       [requestId],
     );
 
@@ -1305,15 +1544,15 @@ const addAttachment = async (req, res) => {
       });
     }
 
-    // Count existing images
+    // COUNT IMAGES
 
     const countResult = await pool.query(
       `
-                SELECT
-                    COUNT(*) AS image_count
-                FROM request_attachments
-                WHERE request_id = $1;
-                `,
+          SELECT
+            COUNT(*) AS image_count
+          FROM public.request_attachments
+          WHERE request_id = $1;
+        `,
       [requestId],
     );
 
@@ -1331,36 +1570,36 @@ const addAttachment = async (req, res) => {
       });
     }
 
-    // Build database path
+    // FILE PATH
 
     const filePath = `/uploads/requests/${req.file.filename}`;
 
-    // Save attachment
+    // INSERT
 
     const attachmentsResult = await pool.query(
       `
-                INSERT INTO request_attachments (
-                    request_id,
-                    file_name,
-                    file_path,
-                    mime_type,
-                    file_size
-                )
-                VALUES (
-                    $1,
-                    $2,
-                    $3,
-                    $4,
-                    $5
-                )
-                RETURNING
-                    id,
-                    request_id,
-                    file_name,
-                    file_path,
-                    mime_type,
-                    file_size;
-                `,
+          INSERT INTO public.request_attachments (
+            request_id,
+            file_name,
+            file_path,
+            mime_type,
+            file_size
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5
+          )
+          RETURNING
+            id,
+            request_id,
+            file_name,
+            file_path,
+            mime_type,
+            file_size;
+        `,
       [
         requestId,
         req.file.originalname,
@@ -1376,8 +1615,6 @@ const addAttachment = async (req, res) => {
       attachment: attachmentsResult.rows[0],
     });
   } catch (error) {
-    // Delete uploaded file if DB insert failed
-
     if (req.file) {
       try {
         await fs.promises.unlink(req.file.path);
@@ -1397,7 +1634,7 @@ const addAttachment = async (req, res) => {
 };
 
 // DELETE ATTACHMENT
-// MANAGER / HR
+// REVIEWER / HR
 
 const deleteAttachment = async (req, res) => {
   try {
@@ -1413,15 +1650,15 @@ const deleteAttachment = async (req, res) => {
 
     const result = await pool.query(
       `
-                SELECT
-                    id,
-                    request_id,
-                    file_name,
-                    file_path,
-                    mime_type
-                FROM request_attachments
-                WHERE id = $1;
-                `,
+          SELECT
+            id,
+            request_id,
+            file_name,
+            file_path,
+            mime_type
+          FROM public.request_attachments
+          WHERE id = $1;
+        `,
       [attachmentId],
     );
 
@@ -1433,28 +1670,25 @@ const deleteAttachment = async (req, res) => {
 
     const attachment = result.rows[0];
 
-    // BUILD PHYSICAL FILE PATH
+    // PHYSICAL FILE
 
-    const relativeFilePath = attachment.file_path.replace(/^[/\\]+/, "");
+    if (attachment.file_path) {
+      const relativeFilePath = attachment.file_path.replace(/^[/\\]+/, "");
 
-    const filePath = path.join(__dirname, "..", relativeFilePath);
+      const filePath = path.join(__dirname, "..", relativeFilePath);
 
-    // DELETE PHYSICAL FILE
+      try {
+        await fs.promises.unlink(filePath);
+      } catch (fileError) {
+        if (fileError.code !== "ENOENT") {
+          console.error("Failed to delete attachment file:", fileError.message);
 
-    try {
-      await fs.promises.unlink(filePath);
-    } catch (fileError) {
-      // If the physical file is already gone,
-      // still delete the database record.
+          return res.status(500).json({
+            message: "Failed to delete image file",
 
-      if (fileError.code !== "ENOENT") {
-        console.error("Failed to delete attachment file:", fileError.message);
-
-        return res.status(500).json({
-          message: "Failed to delete image file",
-
-          error: fileError.message,
-        });
+            error: fileError.message,
+          });
+        }
       }
     }
 
@@ -1462,9 +1696,9 @@ const deleteAttachment = async (req, res) => {
 
     await pool.query(
       `
-            DELETE FROM request_attachments
-            WHERE id = $1;
-            `,
+        DELETE FROM public.request_attachments
+        WHERE id = $1;
+      `,
       [attachmentId],
     );
 
@@ -1487,27 +1721,40 @@ const deleteAttachment = async (req, res) => {
 // EXPORT CONTROLLERS
 
 module.exports = {
+  // Employee
   createRequest,
-
-  managerApproveRequest,
-
-  hrApproveRequest,
-
-  rejectRequest,
-
-  getAllRequests,
-
   getMyRequests,
 
-  getPendingManagerRequests,
+  // Reviewer
+  reviewerApproveRequest,
+  getPendingReviewerRequests,
 
+  // HR
+  hrApproveRequest,
   getPendingHRRequests,
 
+  // Rejection
+  rejectRequest,
+
+  // General
+  getAllRequests,
+  getApprovedRequests,
   getRequestById,
 
+  // Attachments
   downloadAttachment,
-
   addAttachment,
-
   deleteAttachment,
+
+  // ----------------------------------------------------------
+  // BACKWARD-COMPATIBILITY ALIASES
+  //
+  // If your existing requestRoutes.js still calls the old
+  // controller names, these prevent the application from
+  // immediately breaking. We can clean the route names next.
+  // ----------------------------------------------------------
+
+  managerApproveRequest: reviewerApproveRequest,
+
+  getPendingManagerRequests: getPendingReviewerRequests,
 };

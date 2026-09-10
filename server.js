@@ -148,7 +148,7 @@ app.get(
 // ============================================================
 
 const PORT =
-    process.env.PORT || 3000;
+    process.env.PORT || 3001;
 
 
 const server =
@@ -157,7 +157,7 @@ const server =
         () => {
 
             console.log(
-                `Server running on port ${PORT}`
+                `Server running on http://192.168.29.216:${PORT}`
             );
 
         }
