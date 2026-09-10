@@ -1,0 +1,45 @@
+﻿{
+    "timestamp":  "2026-09-09 15:38:30",
+    "computer":  "DESKTOP-VE8HETH",
+    "overallStatus":  "CRITICAL",
+    "system":  {
+                   "cpu":  {
+                               "usage":  82.97,
+                               "status":  "WARNING"
+                           },
+                   "memory":  {
+                                  "usage":  93.16,
+                                  "status":  "CRITICAL"
+                              },
+                   "disk":  {
+                                "drive":  "C:",
+                                "usage":  76.47,
+                                "status":  "NORMAL"
+                            }
+               },
+    "services":  {
+                     "angular":  {
+                                     "status":  "WARNING",
+                                     "httpStatus":  200,
+                                     "responseTime":  626.82,
+                                     "url":  "http://192.168.29.216:8200/welcome",
+                                     "error":  ""
+                                 },
+                     "backend":  {
+                                     "status":  "UP",
+                                     "port":  8080,
+                                     "responseTime":  39.11,
+                                     "host":  "192.168.29.216",
+                                     "error":  ""
+                                 }
+                 },
+    "alerts":  {
+                   "warnings":  [
+                                    "CPU usage is 82.97%",
+                                    "Angular response time is 626.82 ms"
+                                ],
+                   "critical":  [
+                                    "Memory usage is 93.16%"
+                                ]
+               }
+}

@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
 
-const monitorDirectory = path.resolve(__dirname, "..", "..", "ServerMonitor");
+const monitorDirectory = path.resolve(__dirname, "..", "ServerMonitor");
 const healthFile = path.join(monitorDirectory, "monitor_output", "health.json");
 
 let monitorProcess = null;
