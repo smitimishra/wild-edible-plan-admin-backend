@@ -1,36 +1,36 @@
 ﻿{
-    "timestamp":  "2026-09-10 11:35:11",
+    "timestamp":  "2026-09-10 18:00:07",
     "computer":  "DESKTOP-VE8HETH",
-    "overallStatus":  "WARNING",
+    "overallStatus":  "CRITICAL",
     "system":  {
                    "cpu":  {
-                               "usage":  24.6,
+                               "usage":  25.95,
                                "status":  "NORMAL"
                            },
                    "memory":  {
-                                  "usage":  84.01,
-                                  "status":  "WARNING"
+                                  "usage":  91.82,
+                                  "status":  "CRITICAL"
                               },
                    "disk":  {
                                 "drive":  "C:",
-                                "usage":  75.93,
+                                "usage":  76.59,
                                 "status":  "NORMAL"
                             }
                },
     "services":  {
                      "angular":  {
-                                     "status":  "UP",
-                                     "httpStatus":  200,
-                                     "responseTime":  128.62,
-                                     "url":  "http://192.168.29.216:8200/welcome",
-                                     "error":  ""
+                                     "status":  "DOWN",
+                                     "httpStatus":  0,
+                                     "responseTime":  21042.82,
+                                     "url":  "http://192.168.29.218:8200/welcome",
+                                     "error":  "Unable to connect to the remote server"
                                  },
                      "backend":  {
-                                     "status":  "UP",
+                                     "status":  "DOWN",
                                      "port":  8080,
-                                     "responseTime":  24.93,
-                                     "host":  "192.168.29.216",
-                                     "error":  ""
+                                     "responseTime":  21073.36,
+                                     "host":  "192.168.29.218",
+                                     "error":  "TCP connection to port 8080 failed"
                                  },
                      "database":  {
                                       "status":  "UP",
@@ -38,17 +38,19 @@
                                       "port":  5432,
                                       "name":  "wildplant",
                                       "user":  "postgres",
-                                      "responseTime":  404.65,
+                                      "responseTime":  313.68,
                                       "checkType":  "TCP",
                                       "error":  "psql.exe not found. TCP port check passed; database authentication was not tested."
                                   }
                  },
     "alerts":  {
                    "warnings":  [
-                                    "Memory usage is 84.01%"
+
                                 ],
                    "critical":  [
-
+                                    "Memory usage is 91.82%",
+                                    "Angular application is DOWN",
+                                    "Backend port 8080 is DOWN"
                                 ]
                }
 }
