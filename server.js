@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
+
 require("dotenv").config({
     path: path.join(__dirname, ".env")
 });
@@ -10,6 +11,7 @@ const pool = require("./config/db");
 const requestRoutes = require("./routes/requestRoutes");
 const authRoutes = require("./routes/authRoutes");
 const adminRoutes = require("./routes/adminroutes");
+const sessionRoutes = require("./routes/sessionroutes");
 
 
 const app = express();
@@ -49,6 +51,11 @@ app.use(
 app.use(
     "/api/admin",
     adminRoutes
+);
+
+app.use(
+    "/api/sessions",
+    sessionRoutes
 );
 
 
