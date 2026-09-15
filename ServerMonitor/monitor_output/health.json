@@ -22,14 +22,14 @@
                                      "status":  "DOWN",
                                      "httpStatus":  0,
                                      "responseTime":  21042.82,
-                                     "url":  "http://192.168.29.218:8200/welcome",
+                                     "url":  "http://192.168.29.216:8200/welcome",
                                      "error":  "Unable to connect to the remote server"
                                  },
                      "backend":  {
                                      "status":  "DOWN",
                                      "port":  8080,
                                      "responseTime":  21073.36,
-                                     "host":  "192.168.29.218",
+                                     "host":  "192.168.29.216",
                                      "error":  "TCP connection to port 8080 failed"
                                  },
                      "database":  {
