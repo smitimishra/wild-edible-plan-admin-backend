@@ -31,7 +31,7 @@ $BackendPort = 8080
 # POSTGRESQL DATABASE CONFIGURATION
 # ============================================================
 
-$DBHost = "192.168.29.98"
+$DBHost = "192.168.29.216"
 $DBPort = 5432
 $DBName = "wildplant"
 $DBUser = "postgres"
