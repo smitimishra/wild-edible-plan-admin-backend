@@ -22,14 +22,14 @@
                                      "status":  "UP",
                                      "httpStatus":  200,
                                      "responseTime":  128.62,
-                                     "url":  "http://192.168.29.216:8200/welcome",
+                                     "url":  "http://192.168.29.51:8200/welcome",
                                      "error":  ""
                                  },
                      "backend":  {
                                      "status":  "UP",
                                      "port":  8080,
                                      "responseTime":  24.93,
-                                     "host":  "192.168.29.216",
+                                     "host":  "192.168.29.51",
                                      "error":  ""
                                  },
                      "database":  {

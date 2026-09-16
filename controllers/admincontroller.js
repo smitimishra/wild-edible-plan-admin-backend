@@ -523,7 +523,8 @@ const createUser = async (req, res) => {
           ? `Missing required field: ${error.column}`
           : "Missing a required field",
 
-        error: process.env.NODE_ENV === "development" ? error.message : undefined,
+        error:
+          process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }
 
@@ -690,10 +691,7 @@ const updateUser = async (req, res) => {
     let employeeCode = currentUser.employee_code;
 
     if (Number(currentUser.role_id) !== finalRoleId) {
-      employeeCode = await generateEmployeeCode(
-        client,
-        finalRoleId,
-      );
+      employeeCode = await generateEmployeeCode(client, finalRoleId);
     }
 
     // APPROVAL POSITION
@@ -703,8 +701,7 @@ const updateUser = async (req, res) => {
     let approvalPosition = null;
 
     if (finalRoleId === 3) {
-      const reviewerPosition =
-        await getReviewerApprovalPosition(client);
+      const reviewerPosition = await getReviewerApprovalPosition(client);
 
       if (!reviewerPosition) {
         await client.query("ROLLBACK");
@@ -771,16 +768,10 @@ const updateUser = async (req, res) => {
     try {
       await client.query("ROLLBACK");
     } catch (rollbackError) {
-      console.error(
-        "Admin update user rollback error:",
-        rollbackError,
-      );
+      console.error("Admin update user rollback error:", rollbackError);
     }
 
-    console.error(
-      "Admin update user error:",
-      error,
-    );
+    console.error("Admin update user error:", error);
 
     if (error.code === "23505") {
       return res.status(409).json({
@@ -791,10 +782,7 @@ const updateUser = async (req, res) => {
     return res.status(500).json({
       message: "Unable to update user",
 
-      error:
-        process.env.NODE_ENV === "development"
-          ? error.message
-          : undefined,
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   } finally {
     client.release();
@@ -946,42 +934,41 @@ const reactivateUser = async (req, res) => {
 
 // DELETE USER
 
+
+
 const deleteUser = async (req, res) => {
   const client = await pool.connect();
 
   try {
     const userId = Number(req.params.id);
 
-    // VALIDATE USER ID
-
+    // Validate user ID
     if (!Number.isInteger(userId) || userId <= 0) {
       return res.status(400).json({
         message: "Invalid user ID",
       });
     }
 
-    // GET USER
-
+    // Find the user ONLY in user_table
     const userResult = await client.query(
       `
-                SELECT
-                    user_id,
-                    role_id,
-                    user_name,
-                    phone_number,
-                    email_id,
-                    employee_code,
-                    is_active,
-                    approval_position_id,
-                    approval_position
-
-                FROM user_table
-
-                WHERE user_id = $1
-                `,
-      [userId],
+      SELECT
+        user_id,
+        role_id,
+        user_name,
+        phone_number,
+        email_id,
+        employee_code,
+        is_active,
+        approval_position_id,
+        approval_position
+      FROM public.user_table
+      WHERE user_id = $1
+      `,
+      [userId]
     );
 
+    // User does not exist
     if (userResult.rows.length === 0) {
       return res.status(404).json({
         message: "User not found",
@@ -990,136 +977,54 @@ const deleteUser = async (req, res) => {
 
     const user = userResult.rows[0];
 
-    // PREVENT SELF DELETE
-
+    // Prevent admin from deleting their own account
     if (req.user && Number(req.user.id) === userId) {
       return res.status(403).json({
-        message: "You cannot permanently delete your own account",
+        message: "You cannot delete your own account",
       });
     }
 
-    // ADMIN CANNOT BE DELETED
-
+    // Prevent deletion of ADMIN account
     if (Number(user.role_id) === 1) {
       return res.status(403).json({
-        message: "The ADMIN account cannot be permanently deleted",
+        message: "The ADMIN account cannot be deleted",
       });
     }
 
-    // CHECK APPROVAL REQUEST REFERENCES
-
-    const requestReference = await client.query(
-      `
-                SELECT id
-
-                FROM approval_requests
-
-                WHERE employee_id = $1
-
-                LIMIT 1
-                `,
-      [userId],
-    );
-
-    if (requestReference.rows.length > 0) {
-      return res.status(409).json({
-        message:
-          "This user cannot be permanently deleted because they are associated with existing approval requests. Remove or deactivate the user instead.",
-      });
-    }
-
-    // CHECK APPROVAL HISTORY REFERENCES
-
-    const historyReference = await client.query(
-      `
-                SELECT id
-
-                FROM approval_history
-
-                WHERE approver_id = $1
-
-                LIMIT 1
-                `,
-      [userId],
-    );
-
-    if (historyReference.rows.length > 0) {
-      return res.status(409).json({
-        message:
-          "This user cannot be permanently deleted because they are associated with approval history. Remove or deactivate the user instead.",
-      });
-    }
-
-    // CHECK REQUEST ATTACHMENT REFERENCES
-
-    const attachmentReference = await client.query(
-      `
-                SELECT id
-
-                FROM request_attachments
-
-                WHERE uploaded_by = $1
-
-                LIMIT 1
-                `,
-      [userId],
-    );
-
-    if (attachmentReference.rows.length > 0) {
-      return res.status(409).json({
-        message:
-          "This user cannot be permanently deleted because they are associated with request attachments. Remove or deactivate the user instead.",
-      });
-    }
-
-    // DELETE USER SESSIONS FIRST
-
-    await client
-      .query(
-        `
-            DELETE FROM user_sessions
-
-            WHERE user_id = $1
-            `,
-        [userId],
-      )
-      .catch(() => {
-        // Some database versions may not have user_id
-        // in user_sessions. Do not fail the user delete
-        // solely because this optional cleanup is unavailable.
-      });
-
-    // DELETE USER
-
+    // STRICT DELETE:
+    // Only user_table is modified.
+    // No records are manually deleted from any other table.
+    //
+    // PostgreSQL foreign-key constraints will automatically
+    // prevent this deletion if another table references this user.
     await client.query(
       `
-            DELETE FROM user_table
-
-            WHERE user_id = $1
-            `,
-      [userId],
+      DELETE FROM public.user_table
+      WHERE user_id = $1
+      `,
+      [userId]
     );
 
     return res.status(200).json({
       message: "User deleted successfully",
-
       deleted_user: formatUser(user),
     });
+
   } catch (error) {
     console.error("Admin delete user error:", error);
 
+    // PostgreSQL foreign-key violation
     if (error.code === "23503") {
       return res.status(409).json({
         message:
-          "This user cannot be deleted because other records still reference the account. Deactivate the user instead.",
+          "This user cannot be deleted because other records are associated with this account. Deactivate the user instead.",
       });
     }
 
     return res.status(500).json({
       message: "Unable to delete user",
-
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
+
   } finally {
     client.release();
   }
