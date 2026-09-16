@@ -285,35 +285,38 @@ const login = async (req, res) => {
 
         const sessionId = uuidv4();
 
-        const expiresAt = new Date(
-            Date.now() + 60 * 60 * 1000   // 1 hour
-        );
+const expiresAt = new Date(
+    Date.now() + 60 * 60 * 1000   // 1 hour
+);
 
-        const token =
-            jwt.sign(
+const token =
+    jwt.sign(
 
-                {
-                    id:
-                        user.id,
+        {
+            id:
+                user.id,
 
-                    email:
-                        user.email,
+            name:
+                user.name,
 
-                    role:
-                        user.role,
+            email:
+                user.email,
 
-                    session_id:
-                        sessionId
-                },
+            role:
+                user.role,
 
-                process.env.JWT_SECRET,
+            session_id:
+                sessionId
+        },
 
-                {
-                    expiresIn:
-                        "1h"
-                }
+        process.env.JWT_SECRET,
 
-            );
+        {
+            expiresIn:
+                "1h"
+        }
+
+    );
 
 
         // ----------------------------------------------------
