@@ -8,19 +8,33 @@ const healthFile = path.join(monitorDirectory, "monitor_output", "health.json");
 let monitorProcess = null;
 
 function ensureMonitorRunning() {
-    if (monitorProcess && monitorProcess.exitCode === null) return;
+    if (monitorProcess && monitorProcess.exitCode === null) {
+        return false;
+    }
 
-    monitorProcess = spawn(
-        "powershell.exe",
-        ["-ExecutionPolicy", "Bypass", "-File", "./monitor_health_checker_db.ps1"],
-        { cwd: monitorDirectory, detached: true, stdio: "ignore", windowsHide: true }
-    );
+    const isWindows = process.platform === "win32";
+    const command = isWindows ? "powershell.exe" : "bash";
+    const args = isWindows
+        ? ["-ExecutionPolicy", "Bypass", "-File", "./monitor_health_checker_db.ps1"]
+        : ["./monitor.sh"];
+
+    monitorProcess = spawn(command, args, {
+        cwd: monitorDirectory,
+        detached: true,
+        stdio: "ignore",
+        windowsHide: isWindows
+    });
 
     monitorProcess.unref();
     monitorProcess.on("error", (error) => {
         console.error("Unable to start ServerMonitor:", error.message);
         monitorProcess = null;
     });
+    monitorProcess.on("exit", () => {
+        monitorProcess = null;
+    });
+
+    return true;
 }
 
 function readHealth() {
@@ -55,10 +69,14 @@ async function readFreshHealth(previousTimestamp) {
 
 async function getHealth(req, res) {
     try {
-        const previousHealth = readHealth();
-        ensureMonitorRunning();
+        const currentHealth = readHealth();
+        const monitorStarted = ensureMonitorRunning();
 
-        const health = await readFreshHealth(previousHealth?.timestamp);
+        // On the first click, wait for the newly started script to publish its
+        // first result instead of showing an old file from a previous session.
+        const health = monitorStarted
+            ? await readFreshHealth(currentHealth?.timestamp)
+            : currentHealth || await readFreshHealth();
         if (!health) {
             return res.status(503).json({
                 message: "Health monitor is starting. Please try again shortly."
