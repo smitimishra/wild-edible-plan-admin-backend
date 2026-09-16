@@ -6,3 +6,33 @@
 2026-09-09 15:38:31 | ANGULAR SLOW | ResponseTime=626.82 ms
 2026-09-09 15:38:43 | CPU HIGH | CPU Usage=90.82%
 2026-09-10 11:35:21 | MEMORY HIGH | Memory Usage=84.07%
+2026-09-16 13:10:49 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:11:04 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:11:18 | MEMORY HIGH | Memory Usage=85.25%
+2026-09-16 13:13:24 | ANGULAR SLOW | ResponseTime=950.51 ms
+2026-09-16 13:11:14 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:13:31 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:13:40 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:13:49 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:13:58 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:14:08 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:14:18 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:14:32 | ANGULAR SLOW | ResponseTime=945.41 ms
+2026-09-16 13:14:28 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:14:41 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:14:55 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:15:04 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:15:13 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:15:22 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:15:37 | ANGULAR SLOW | ResponseTime=1046.94 ms
+2026-09-16 13:15:31 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:15:45 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:15:54 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:16:03 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:16:13 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:16:22 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:16:36 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:16:45 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:16:55 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
+2026-09-16 13:17:11 | ANGULAR SLOW | ResponseTime=1004.46 ms
+2026-09-16 13:17:06 - CRITICAL - PostgreSQL database wildplant is DOWN. PostgreSQL port 5432 is not reachable.
