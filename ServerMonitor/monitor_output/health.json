@@ -1,19 +1,19 @@
 ﻿{
-    "timestamp":  "2026-09-16 13:17:06",
+    "timestamp":  "2026-09-16 16:23:34",
     "computer":  "DESKTOP-VE8HETH",
     "overallStatus":  "CRITICAL",
     "system":  {
                    "cpu":  {
-                               "usage":  26.04,
+                               "usage":  18.18,
                                "status":  "NORMAL"
                            },
                    "memory":  {
-                                  "usage":  86.61,
+                                  "usage":  86.2,
                                   "status":  "WARNING"
                               },
                    "disk":  {
                                 "drive":  "C:",
-                                "usage":  75.49,
+                                "usage":  75.53,
                                 "status":  "NORMAL"
                             }
                },
@@ -38,17 +38,17 @@
                                       "port":  5432,
                                       "name":  "wildplant",
                                       "user":  "postgres",
-                                      "responseTime":  2178.77,
+                                      "responseTime":  2332.15,
                                       "checkType":  "TCP",
                                       "error":  "PostgreSQL port 5432 is not reachable."
                                   }
                  },
     "alerts":  {
                    "warnings":  [
-                                    "Memory usage is 86.61%"
+                                    "Memory usage is 86.2%"
                                 ],
                    "critical":  [
-                                    "Angular response time is 1004.46 ms",
+                                    "Angular response time is 2118.21 ms",
                                     "PostgreSQL database wildplant is DOWN"
                                 ]
                }

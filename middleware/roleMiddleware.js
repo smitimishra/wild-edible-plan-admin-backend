@@ -130,11 +130,19 @@ const authorizeRoles = (...allowedRoles) => {
             // GET DATABASE ROLE
             // ========================================================
 
-            const userRole = String(
-                dbUser.role_name || ""
-            )
-                .trim()
-                .toUpperCase();
+            // Keep authorization aligned with the application's canonical
+            // role mapping. This also handles databases where role_name was
+            // seeded as "Administrator" instead of "ADMIN".
+            const roleById = {
+                1: "ADMIN",
+                2: "EMPLOYEE",
+                3: "REVIEWER"
+            };
+
+            const userRole = roleById[Number(dbUser.role_id)] ||
+                String(dbUser.role_name || "")
+                    .trim()
+                    .toUpperCase();
 
 
             // ========================================================
