@@ -31,6 +31,7 @@ const {
 } = require("../controllers/settingscontroller");
 
 const { getHealth } = require("../controllers/healthcontroller");
+const { getCurrentProfile } = require("../controllers/profilecontroller");
 
 
 const authenticateToken =
@@ -48,6 +49,13 @@ router.get(
     authenticateToken,
     authorizeRoles("ADMIN"),
     getHealth
+);
+
+router.get(
+    "/profile",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    getCurrentProfile
 );
 
 

@@ -148,6 +148,20 @@ const login = async (req, res) => {
 
         const user = result.rows[0];
 
+        const profileResult = await pool.query(
+            `
+            SELECT user_name
+            FROM public.user_table
+            WHERE LOWER(email_id) = LOWER($1)
+            LIMIT 1
+            `,
+            [normalizedEmail]
+        );
+
+        const userName =
+            profileResult.rows[0]?.user_name ||
+            user.name;
+
 
         // ----------------------------------------------------
         // CHECK ACCOUNT STATUS
@@ -298,6 +312,9 @@ const token =
 
             name:
                 user.name,
+
+            user_name:
+                userName,
 
             email:
                 user.email,
@@ -726,7 +743,7 @@ const forgotPassword = async (req, res) => {
         // ----------------------------------------------------
 
         const resetUrl =
-            `http://192.168.29.216:4200/reset-password?token=${resetToken}`;
+            `http://192.168.29.217:4200/reset-password?token=${resetToken}`;
 
 
         // ----------------------------------------------------
