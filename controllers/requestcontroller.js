@@ -259,13 +259,6 @@ const createRequest = async (req, res) => {
     transactionStarted = true;
 
     // INSERT INTO approval_requests
-    //
-    // Current schema:
-    // id
-    // request_number
-    // status
-    // current_approval_level
-    // request_data
 
     const requestResult = await client.query(
       `
@@ -370,7 +363,7 @@ const createRequest = async (req, res) => {
 };
 
 // REVIEWER APPROVE REQUEST
-// EMPLOYEE -> REVIEWER -> HR
+// EMPLOYEE -> REVIEWER -> APPROVED
 
 const reviewerApproveRequest = async (req, res) => {
   const client = await pool.connect();
@@ -510,21 +503,28 @@ const reviewerApproveRequest = async (req, res) => {
       [requestId, reviewerId, 1, comments],
     );
 
-    // UPDATE REQUEST
-
-    const updateResult = await client.query(
-      `
-          UPDATE public.approval_requests
-          SET
-            request_data = $1::jsonb,
-            status = 'PENDING_HR',
-            current_approval_level = 2
-          WHERE id = $2
-          RETURNING *;
-        `,
-      [JSON.stringify(updatedRequestData), requestId],
-    );
-
+    // ======================================================
+    // IMPORTANT CHANGE
+    //
+    // Reviewer approval is the FINAL approval.
+    //
+    // PENDING_REVIEWER -> APPROVED
+    //
+    // There is no HR approval step in the active workflow.
+    // ======================================================
+const updateResult = await client.query(
+  `
+    UPDATE public.approval_requests
+    SET
+      request_data = $1::jsonb,
+      status = 'APPROVED',
+      current_approval_level = 1
+    WHERE id = $2
+    RETURNING *;
+  `,
+  [JSON.stringify(updatedRequestData), requestId],
+);
+  
     // COMMIT
 
     await client.query("COMMIT");
@@ -532,7 +532,7 @@ const reviewerApproveRequest = async (req, res) => {
     transactionStarted = false;
 
     return res.status(200).json({
-      message: "Plant approved by reviewer and sent to HR",
+      message: "Plant approved by reviewer",
 
       request: normalizeRequest(updateResult.rows[0]),
 
@@ -569,6 +569,9 @@ const reviewerApproveRequest = async (req, res) => {
 
 // HR APPROVE REQUEST
 // REVIEWER -> HR -> APPROVED
+//
+// KEPT IN PLACE FOR BACKWARD COMPATIBILITY.
+// It is NOT used by the current Manager/Reviewer workflow.
 
 const hrApproveRequest = async (req, res) => {
   const client = await pool.connect();
@@ -612,11 +615,11 @@ const hrApproveRequest = async (req, res) => {
 
     const requestResult = await client.query(
       `
-          SELECT *
-          FROM public.approval_requests
-          WHERE id = $1
-          FOR UPDATE;
-        `,
+        SELECT *
+        FROM public.approval_requests
+        WHERE id = $1
+        FOR UPDATE;
+      `,
       [requestId],
     );
 
@@ -695,18 +698,18 @@ const hrApproveRequest = async (req, res) => {
 
     const attachmentsResult = await client.query(
       `
-          SELECT
-            id,
-            request_id,
-            file_name,
-            file_path,
-            mime_type,
-            file_size,
-            image_type
-          FROM public.request_attachments
-          WHERE request_id = $1
-          ORDER BY id ASC;
-        `,
+        SELECT
+          id,
+          request_id,
+          file_name,
+          file_path,
+          mime_type,
+          file_size,
+          image_type
+        FROM public.request_attachments
+        WHERE request_id = $1
+        ORDER BY id ASC;
+      `,
       [requestId],
     );
 
@@ -736,49 +739,47 @@ const hrApproveRequest = async (req, res) => {
     );
 
     // INSERT INTO plant_table
-    //
-    // New main plant table
 
     const plantResult = await client.query(
       `
-          INSERT INTO public.plant_table (
-            image_id,
-            scientific_name,
-            common_name,
-            family,
-            habitat,
-            distribution,
-            edible_parts,
-            nutritional_value,
-            flowering_season,
-            conservation_status,
-            image_url,
-            latitude,
-            longitude,
-            uploaded_by,
-            verified_status,
-            created_date
-          )
-          VALUES (
-            $1,
-            $2,
-            $3,
-            $4,
-            $5,
-            $6,
-            $7,
-            $8,
-            $9,
-            $10,
-            $11,
-            $12,
-            $13,
-            $14,
-            TRUE,
-            CURRENT_TIMESTAMP
-          )
-          RETURNING *;
-        `,
+        INSERT INTO public.plant_table (
+          image_id,
+          scientific_name,
+          common_name,
+          family,
+          habitat,
+          distribution,
+          edible_parts,
+          nutritional_value,
+          flowering_season,
+          conservation_status,
+          image_url,
+          latitude,
+          longitude,
+          uploaded_by,
+          verified_status,
+          created_date
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          $6,
+          $7,
+          $8,
+          $9,
+          $10,
+          $11,
+          $12,
+          $13,
+          $14,
+          TRUE,
+          CURRENT_TIMESTAMP
+        )
+        RETURNING *;
+      `,
       [
         firstAttachment ? Number(firstAttachment.id) : null,
 
@@ -828,14 +829,14 @@ const hrApproveRequest = async (req, res) => {
 
     const updateResult = await client.query(
       `
-          UPDATE public.approval_requests
-          SET
-            request_data = $1::jsonb,
-            status = 'APPROVED',
-            current_approval_level = 3
-          WHERE id = $2
-          RETURNING *;
-        `,
+        UPDATE public.approval_requests
+        SET
+          request_data = $1::jsonb,
+          status = 'APPROVED',
+          current_approval_level = 3
+        WHERE id = $2
+        RETURNING *;
+      `,
       [JSON.stringify(updatedRequestData), requestId],
     );
 
@@ -925,11 +926,11 @@ const rejectRequest = async (req, res) => {
 
     const requestResult = await client.query(
       `
-          SELECT *
-          FROM public.approval_requests
-          WHERE id = $1
-          FOR UPDATE;
-        `,
+        SELECT *
+        FROM public.approval_requests
+        WHERE id = $1
+        FOR UPDATE;
+      `,
       [requestId],
     );
 
@@ -1013,13 +1014,13 @@ const rejectRequest = async (req, res) => {
 
     const updateResult = await client.query(
       `
-          UPDATE public.approval_requests
-          SET
-            request_data = $1::jsonb,
-            status = 'REJECTED'
-          WHERE id = $2
-          RETURNING *;
-        `,
+        UPDATE public.approval_requests
+        SET
+          request_data = $1::jsonb,
+          status = 'REJECTED'
+        WHERE id = $2
+        RETURNING *;
+      `,
       [JSON.stringify(updatedRequestData), requestId],
     );
 
@@ -1059,15 +1060,15 @@ const getAllRequests = async (req, res) => {
   try {
     const result = await pool.query(
       `
-          SELECT
-            ar.id,
-            ar.request_number,
-            ar.request_data,
-            ar.status,
-            ar.current_approval_level
-          FROM public.approval_requests ar
-          ORDER BY ar.id DESC;
-        `,
+        SELECT
+          ar.id,
+          ar.request_number,
+          ar.request_data,
+          ar.status,
+          ar.current_approval_level
+        FROM public.approval_requests ar
+        ORDER BY ar.id DESC;
+      `,
     );
 
     const requests = result.rows.map(normalizeRequest);
@@ -1096,16 +1097,16 @@ const getPendingReviewerRequests = async (req, res) => {
   try {
     const result = await pool.query(
       `
-          SELECT
-            ar.id,
-            ar.request_number,
-            ar.request_data,
-            ar.status,
-            ar.current_approval_level
-          FROM public.approval_requests ar
-          WHERE ar.status = 'PENDING_REVIEWER'
-          ORDER BY ar.id ASC;
-        `,
+        SELECT
+          ar.id,
+          ar.request_number,
+          ar.request_data,
+          ar.status,
+          ar.current_approval_level
+        FROM public.approval_requests ar
+        WHERE ar.status = 'PENDING_REVIEWER'
+        ORDER BY ar.id ASC;
+      `,
     );
 
     const requests = result.rows.map(normalizeRequest);
@@ -1134,16 +1135,16 @@ const getPendingHRRequests = async (req, res) => {
   try {
     const result = await pool.query(
       `
-          SELECT
-            ar.id,
-            ar.request_number,
-            ar.request_data,
-            ar.status,
-            ar.current_approval_level
-          FROM public.approval_requests ar
-          WHERE ar.status = 'PENDING_HR'
-          ORDER BY ar.id ASC;
-        `,
+        SELECT
+          ar.id,
+          ar.request_number,
+          ar.request_data,
+          ar.status,
+          ar.current_approval_level
+        FROM public.approval_requests ar
+        WHERE ar.status = 'PENDING_HR'
+        ORDER BY ar.id ASC;
+      `,
     );
 
     const requests = result.rows.map(normalizeRequest);
@@ -1170,19 +1171,32 @@ const getPendingHRRequests = async (req, res) => {
 
 const getApprovedRequests = async (req, res) => {
   try {
-    const result = await pool.query(
-      `
-          SELECT
-            ar.id,
-            ar.request_number,
-            ar.request_data,
-            ar.status,
-            ar.current_approval_level
-          FROM public.approval_requests ar
-          WHERE ar.status = 'APPROVED'
-          ORDER BY ar.id DESC;
-        `,
-    );
+     const result = await pool.query(
+  `
+    SELECT
+      ar.*,
+      COALESCE(
+        jsonb_agg(
+          jsonb_build_object(
+            'id', ra.id,
+            'file_name', ra.file_name,
+            'file_path', ra.file_path,
+            'mime_type', ra.mime_type,
+            'file_size', ra.file_size,
+            'image_type', ra.image_type
+          )
+        ) FILTER (WHERE ra.id IS NOT NULL),
+        '[]'::jsonb
+      ) AS attachments
+    FROM public.approval_requests ar
+    LEFT JOIN public.request_attachments ra
+      ON ra.request_id = ar.id
+    WHERE ar.status = 'APPROVED'
+    GROUP BY ar.id
+    ORDER BY ar.id DESC;
+  `,
+);
+    
 
     const requests = result.rows.map(normalizeRequest);
 
@@ -1214,15 +1228,15 @@ const getRequestById = async (req, res) => {
 
     const requestResult = await pool.query(
       `
-          SELECT
-            ar.id,
-            ar.request_number,
-            ar.request_data,
-            ar.status,
-            ar.current_approval_level
-          FROM public.approval_requests ar
-          WHERE ar.id = $1;
-        `,
+        SELECT
+          ar.id,
+          ar.request_number,
+          ar.request_data,
+          ar.status,
+          ar.current_approval_level
+        FROM public.approval_requests ar
+        WHERE ar.id = $1;
+      `,
       [requestId],
     );
 
@@ -1238,18 +1252,18 @@ const getRequestById = async (req, res) => {
 
     const attachmentsResult = await pool.query(
       `
-          SELECT
-            id,
-            request_id,
-            file_name,
-            file_path,
-            mime_type,
-            file_size,
-            image_type
-          FROM public.request_attachments
-          WHERE request_id = $1
-          ORDER BY id ASC;
-        `,
+        SELECT
+          id,
+          request_id,
+          file_name,
+          file_path,
+          mime_type,
+          file_size,
+          image_type
+        FROM public.request_attachments
+        WHERE request_id = $1
+        ORDER BY id ASC;
+      `,
       [requestId],
     );
 
@@ -1257,46 +1271,41 @@ const getRequestById = async (req, res) => {
 
     const historyResult = await pool.query(
       `
-          SELECT
-            ah.id,
-            ah.request_id,
-            ah.approver_id,
-            ah.approval_level,
-            ah.action,
-            ah.comments,
-            ah.action_at,
+        SELECT
+          ah.id,
+          ah.request_id,
+          ah.approver_id,
+          ah.approval_level,
+          ah.action,
+          ah.comments,
+          ah.action_at,
 
-            u.user_id,
-            u.user_name AS approver_name,
-            u.email_id AS approver_email,
-            u.employee_code,
-            u.role_id,
+          u.user_id,
+          u.user_name AS approver_name,
+          u.email_id AS approver_email,
+          u.employee_code,
+          u.role_id,
 
-            r.role_name AS approver_role
+          r.role_name AS approver_role
 
-          FROM public.approval_history ah
+        FROM public.approval_history ah
 
-          LEFT JOIN public.user_table u
-            ON u.user_id = ah.approver_id
+        LEFT JOIN public.user_table u
+          ON u.user_id = ah.approver_id
 
-          LEFT JOIN public.role_table r
-            ON r.role_id = u.role_id
+        LEFT JOIN public.role_table r
+          ON r.role_id = u.role_id
 
-          WHERE ah.request_id = $1
+        WHERE ah.request_id = $1
 
-          ORDER BY
-            ah.approval_level ASC,
-            ah.action_at ASC;
-        `,
+        ORDER BY
+          ah.approval_level ASC,
+          ah.action_at ASC;
+      `,
       [requestId],
     );
 
     // PLANT DETAILS
-    //
-    // There is no plant_details table anymore.
-    //
-    // For an approved request, request_data contains
-    // the plant information.
 
     const plantDetails =
       request.status === "APPROVED"
@@ -1340,9 +1349,7 @@ const getRequestById = async (req, res) => {
 
       plant_details: plantDetails,
 
-      // ------------------------------------------------------
       // TOP LEVEL COMPATIBILITY FIELDS
-      // ------------------------------------------------------
 
       id: request.id,
 
@@ -1395,15 +1402,15 @@ const downloadAttachment = async (req, res) => {
 
     const result = await pool.query(
       `
-          SELECT
-            id,
-            request_id,
-            file_name,
-            file_path,
-            mime_type
-          FROM public.request_attachments
-          WHERE id = $1;
-        `,
+        SELECT
+          id,
+          request_id,
+          file_name,
+          file_path,
+          mime_type
+        FROM public.request_attachments
+        WHERE id = $1;
+      `,
       [attachmentId],
     );
 
@@ -1463,20 +1470,20 @@ const getMyRequests = async (req, res) => {
 
     const result = await pool.query(
       `
-          SELECT
-            ar.id,
-            ar.request_number,
-            ar.request_data,
-            ar.status,
-            ar.current_approval_level
-          FROM public.approval_requests ar
-          WHERE
-            COALESCE(
-              ar.request_data ->> 'employee_id',
-              ar.request_data ->> 'user_id'
-            ) = $1::text
-          ORDER BY ar.id DESC;
-        `,
+        SELECT
+          ar.id,
+          ar.request_number,
+          ar.request_data,
+          ar.status,
+          ar.current_approval_level
+        FROM public.approval_requests ar
+        WHERE
+          COALESCE(
+            ar.request_data ->> 'employee_id',
+            ar.request_data ->> 'user_id'
+          ) = $1::text
+        ORDER BY ar.id DESC;
+      `,
       [String(employeeId)],
     );
 
@@ -1523,12 +1530,12 @@ const addAttachment = async (req, res) => {
 
     const requestResult = await pool.query(
       `
-          SELECT
-            id,
-            status
-          FROM public.approval_requests
-          WHERE id = $1;
-        `,
+        SELECT
+          id,
+          status
+        FROM public.approval_requests
+        WHERE id = $1;
+      `,
       [requestId],
     );
 
@@ -1548,11 +1555,11 @@ const addAttachment = async (req, res) => {
 
     const countResult = await pool.query(
       `
-          SELECT
-            COUNT(*) AS image_count
-          FROM public.request_attachments
-          WHERE request_id = $1;
-        `,
+        SELECT
+          COUNT(*) AS image_count
+        FROM public.request_attachments
+        WHERE request_id = $1;
+      `,
       [requestId],
     );
 
@@ -1578,28 +1585,28 @@ const addAttachment = async (req, res) => {
 
     const attachmentsResult = await pool.query(
       `
-          INSERT INTO public.request_attachments (
-            request_id,
-            file_name,
-            file_path,
-            mime_type,
-            file_size
-          )
-          VALUES (
-            $1,
-            $2,
-            $3,
-            $4,
-            $5
-          )
-          RETURNING
-            id,
-            request_id,
-            file_name,
-            file_path,
-            mime_type,
-            file_size;
-        `,
+        INSERT INTO public.request_attachments (
+          request_id,
+          file_name,
+          file_path,
+          mime_type,
+          file_size
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5
+        )
+        RETURNING
+          id,
+          request_id,
+          file_name,
+          file_path,
+          mime_type,
+          file_size;
+      `,
       [
         requestId,
         req.file.originalname,
@@ -1650,15 +1657,15 @@ const deleteAttachment = async (req, res) => {
 
     const result = await pool.query(
       `
-          SELECT
-            id,
-            request_id,
-            file_name,
-            file_path,
-            mime_type
-          FROM public.request_attachments
-          WHERE id = $1;
-        `,
+        SELECT
+          id,
+          request_id,
+          file_name,
+          file_path,
+          mime_type
+        FROM public.request_attachments
+        WHERE id = $1;
+      `,
       [attachmentId],
     );
 
@@ -1746,15 +1753,7 @@ module.exports = {
   addAttachment,
   deleteAttachment,
 
-  // ----------------------------------------------------------
   // BACKWARD-COMPATIBILITY ALIASES
-  //
-  // If your existing requestRoutes.js still calls the old
-  // controller names, these prevent the application from
-  // immediately breaking. We can clean the route names next.
-  // ----------------------------------------------------------
-
   managerApproveRequest: reviewerApproveRequest,
-
   getPendingManagerRequests: getPendingReviewerRequests,
 };

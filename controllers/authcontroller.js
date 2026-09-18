@@ -36,14 +36,16 @@ const login = async (req, res) => {
 
         }
 
+
         const normalizedEmail = email.trim().toLowerCase();
+
 
         // ----------------------------------------------------
         // LOAD LOCKOUT SETTINGS
         // ----------------------------------------------------
 
         const [maxAttempts, lockoutHours] = await Promise.all([
-            getNumericSetting("login_max_attempts",  3),
+            getNumericSetting("login_max_attempts", 3),
             getNumericSetting("login_lockout_hours", 1)
         ]);
 
@@ -58,49 +60,70 @@ const login = async (req, res) => {
         const attemptsResult = await pool.query(
             `
             SELECT COUNT(*) AS cnt
-            FROM   login_attempts
-            WHERE  email        = $1
-              AND  success      = FALSE
-              AND  attempted_at > NOW() - ($2 || ' hours')::INTERVAL
+            FROM login_attempts
+            WHERE email = $1
+              AND success = FALSE
+              AND attempted_at > NOW() - ($2 || ' hours')::INTERVAL
             `,
             [normalizedEmail, lockoutHours]
         );
 
-        const recentFailed = parseInt(attemptsResult.rows[0].cnt, 10);
+
+        const recentFailed =
+            parseInt(attemptsResult.rows[0].cnt, 10);
+
 
         if (recentFailed >= maxAttempts) {
 
             // Find when the lockout window started
             // (the oldest failed attempt within the window)
+
             const oldestResult = await pool.query(
                 `
                 SELECT attempted_at
-                FROM   login_attempts
-                WHERE  email        = $1
-                  AND  success      = FALSE
-                  AND  attempted_at > NOW() - ($2 || ' hours')::INTERVAL
+                FROM login_attempts
+                WHERE email = $1
+                  AND success = FALSE
+                  AND attempted_at > NOW() - ($2 || ' hours')::INTERVAL
                 ORDER BY attempted_at ASC
                 LIMIT 1
                 `,
                 [normalizedEmail, lockoutHours]
             );
 
-            const lockedSince = oldestResult.rows[0]?.attempted_at
-                ? new Date(oldestResult.rows[0].attempted_at)
-                : new Date();
 
-            const unlocksAt = new Date(lockedSince.getTime() + windowMs);
+            const lockedSince =
+                oldestResult.rows[0]?.attempted_at
+                    ? new Date(oldestResult.rows[0].attempted_at)
+                    : new Date();
 
-            const minutesLeft = Math.max(
-                1,
-                Math.ceil((unlocksAt.getTime() - Date.now()) / 60000)
-            );
+
+            const unlocksAt =
+                new Date(
+                    lockedSince.getTime() + windowMs
+                );
+
+
+            const minutesLeft =
+                Math.max(
+                    1,
+                    Math.ceil(
+                        (unlocksAt.getTime() - Date.now()) / 60000
+                    )
+                );
+
 
             return res.status(429).json({
-                message:       "account_locked",
-                lockedUntil:   unlocksAt.toISOString(),
+
+                message: "account_locked",
+
+                lockedUntil:
+                    unlocksAt.toISOString(),
+
                 minutesLeft,
+
                 lockoutHours
+
             });
 
         }
@@ -134,13 +157,22 @@ const login = async (req, res) => {
         if (result.rows.length === 0) {
 
             await pool.query(
-                `INSERT INTO login_attempts (email, success, ip_address)
-                 VALUES ($1, FALSE, $2)`,
-                [normalizedEmail, req.ip ?? null]
+                `INSERT INTO login_attempts
+                    (email, success, ip_address)
+                 VALUES
+                    ($1, FALSE, $2)`,
+                [
+                    normalizedEmail,
+                    req.ip ?? null
+                ]
             );
 
+
             return res.status(401).json({
-                message: "Invalid email or password"
+
+                message:
+                    "Invalid email or password"
+
             });
 
         }
@@ -179,61 +211,115 @@ const login = async (req, res) => {
         if (!passwordMatch) {
 
             // Record failed attempt
+
             await pool.query(
-                `INSERT INTO login_attempts (email, success, ip_address)
-                 VALUES ($1, FALSE, $2)`,
-                [normalizedEmail, req.ip ?? null]
+                `INSERT INTO login_attempts
+                    (email, success, ip_address)
+                 VALUES
+                    ($1, FALSE, $2)`,
+                [
+                    normalizedEmail,
+                    req.ip ?? null
+                ]
             );
 
-            // Count again after recording to give accurate "attempts left"
+
+            // Count again after recording to give accurate
+            // "attempts left"
+
             const afterResult = await pool.query(
                 `
                 SELECT COUNT(*) AS cnt
-                FROM   login_attempts
-                WHERE  email        = $1
-                  AND  success      = FALSE
-                  AND  attempted_at > NOW() - ($2 || ' hours')::INTERVAL
+                FROM login_attempts
+                WHERE email = $1
+                  AND success = FALSE
+                  AND attempted_at > NOW() - ($2 || ' hours')::INTERVAL
                 `,
-                [normalizedEmail, lockoutHours]
+                [
+                    normalizedEmail,
+                    lockoutHours
+                ]
             );
 
-            const totalFailed = parseInt(afterResult.rows[0].cnt, 10);
-            const attemptsLeft = Math.max(0, maxAttempts - totalFailed);
+
+            const totalFailed =
+                parseInt(
+                    afterResult.rows[0].cnt,
+                    10
+                );
+
+
+            const attemptsLeft =
+                Math.max(
+                    0,
+                    maxAttempts - totalFailed
+                );
+
 
             if (attemptsLeft === 0) {
 
-                // Just got locked — find the lockout start time
-                const oldestResult2 = await pool.query(
-                    `
-                    SELECT attempted_at
-                    FROM   login_attempts
-                    WHERE  email        = $1
-                      AND  success      = FALSE
-                      AND  attempted_at > NOW() - ($2 || ' hours')::INTERVAL
-                    ORDER BY attempted_at ASC
-                    LIMIT 1
-                    `,
-                    [normalizedEmail, lockoutHours]
-                );
+                // Just got locked — find the lockout
+                // start time
 
-                const lockedSince2 = oldestResult2.rows[0]?.attempted_at
-                    ? new Date(oldestResult2.rows[0].attempted_at)
-                    : new Date();
+                const oldestResult2 =
+                    await pool.query(
+                        `
+                        SELECT attempted_at
+                        FROM login_attempts
+                        WHERE email = $1
+                          AND success = FALSE
+                          AND attempted_at > NOW() - ($2 || ' hours')::INTERVAL
+                        ORDER BY attempted_at ASC
+                        LIMIT 1
+                        `,
+                        [
+                            normalizedEmail,
+                            lockoutHours
+                        ]
+                    );
 
-                const unlocksAt2 = new Date(lockedSince2.getTime() + windowMs);
+
+                const lockedSince2 =
+                    oldestResult2.rows[0]?.attempted_at
+                        ? new Date(
+                            oldestResult2.rows[0].attempted_at
+                        )
+                        : new Date();
+
+
+                const unlocksAt2 =
+                    new Date(
+                        lockedSince2.getTime() + windowMs
+                    );
+
 
                 return res.status(429).json({
-                    message:       "account_locked",
-                    lockedUntil:   unlocksAt2.toISOString(),
-                    minutesLeft:   Math.ceil(lockoutHours * 60),
+
+                    message:
+                        "account_locked",
+
+                    lockedUntil:
+                        unlocksAt2.toISOString(),
+
+                    minutesLeft:
+                        Math.ceil(
+                            lockoutHours * 60
+                        ),
+
                     lockoutHours
+
                 });
 
             }
 
+
             return res.status(401).json({
-                message:      "Invalid email or password",
+
+                message:
+                    "Invalid email or password",
+
                 attemptsLeft
+
             });
 
         }
@@ -243,15 +329,21 @@ const login = async (req, res) => {
         // CHECK FOR EXISTING ACTIVE SESSION
         // ----------------------------------------------------
 
-        const existingSession = await pool.query(
-            `SELECT id, session_id
-             FROM user_sessions
-             WHERE user_id = $1
-               AND is_active = true
-             ORDER BY created_at DESC
-             LIMIT 1`,
-            [user.id]
-        );
+        const existingSession =
+            await pool.query(
+                `
+                SELECT
+                    id,
+                    session_id
+                FROM user_sessions
+                WHERE user_id = $1
+                  AND is_active = true
+                ORDER BY created_at DESC
+                LIMIT 1
+                `,
+                [user.id]
+            );
+
 
         if (existingSession.rows.length > 0) {
 
@@ -273,9 +365,14 @@ const login = async (req, res) => {
         // ----------------------------------------------------
 
         await pool.query(
-            `INSERT INTO login_attempts (email, success, ip_address)
-             VALUES ($1, TRUE, $2)`,
-            [normalizedEmail, req.ip ?? null]
+            `INSERT INTO login_attempts
+                (email, success, ip_address)
+             VALUES
+                ($1, TRUE, $2)`,
+            [
+                normalizedEmail,
+                req.ip ?? null
+            ]
         );
 
 
@@ -283,40 +380,69 @@ const login = async (req, res) => {
         // CREATE JWT
         // ----------------------------------------------------
 
-        const sessionId = uuidv4();
+        const sessionId =
+            uuidv4();
 
-const expiresAt = new Date(
-    Date.now() + 60 * 60 * 1000   // 1 hour
-);
 
-const token =
-    jwt.sign(
+        const expiresAt =
+            new Date(
+                Date.now() + 60 * 60 * 1000
+            );
 
-        {
-            id:
-                user.id,
 
-            name:
-                user.name,
+        // ----------------------------------------------------
+        // IMPORTANT:
+        // Login credentials remain ONLY email + password.
+        //
+        // The name comes from the database user record and is
+        // included ONLY in the JWT payload.
+        // ----------------------------------------------------
 
-            email:
-                user.email,
+        console.log(
+            "LOGIN USER NAME BEFORE JWT:",
+            user.name
+        );
 
-            role:
-                user.role,
 
-            session_id:
-                sessionId
-        },
+        const jwtName =
+            user.name ??
+            user.user_name ??
+            user.username ??
+            "";
 
-        process.env.JWT_SECRET,
 
-        {
-            expiresIn:
-                "1h"
-        }
+        console.log(
+            "LOGIN JWT NAME VALUE:",
+            jwtName
+        );
 
-    );
+
+        const token =
+            jwt.sign(
+                {
+                    id:
+                        user.id,
+
+                    name:
+                        jwtName,
+
+                    email:
+                        user.email,
+
+                    role:
+                        user.role,
+
+                    session_id:
+                        sessionId
+                },
+
+                process.env.JWT_SECRET,
+
+                {
+                    expiresIn:
+                        "1h"
+                }
+            );
 
 
         // ----------------------------------------------------
@@ -324,11 +450,31 @@ const token =
         // ----------------------------------------------------
 
         await pool.query(
-            `INSERT INTO user_sessions
-                 (user_id, session_id, is_active, created_at, last_activity, expires_at)
-             VALUES
-                 ($1, $2, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $3)`,
-            [user.id, sessionId, expiresAt]
+            `
+            INSERT INTO user_sessions
+                (
+                    user_id,
+                    session_id,
+                    is_active,
+                    created_at,
+                    last_activity,
+                    expires_at
+                )
+            VALUES
+                (
+                    $1,
+                    $2,
+                    true,
+                    CURRENT_TIMESTAMP,
+                    CURRENT_TIMESTAMP,
+                    $3
+                )
+            `,
+            [
+                user.id,
+                sessionId,
+                expiresAt
+            ]
         );
 
 
@@ -352,7 +498,7 @@ const token =
                     user.employee_code,
 
                 name:
-                    user.name,
+                    jwtName,
 
                 email:
                     user.email,
@@ -391,6 +537,7 @@ const token =
 // ============================================================
 // REGISTER
 // ============================================================
+
 // NOTE:
 // Registration creates normal EMPLOYEE accounts.
 // ADMIN creates MANAGER / HR accounts through the Admin panel.
@@ -448,8 +595,10 @@ const register = async (req, res) => {
         const normalizedEmployeeCode =
             employee_code.trim();
 
+
         const normalizedName =
             name.trim();
+
 
         const normalizedEmail =
             email.trim().toLowerCase();
@@ -466,7 +615,9 @@ const register = async (req, res) => {
                 FROM users
                 WHERE LOWER(email) = $1
                 `,
-                [normalizedEmail]
+                [
+                    normalizedEmail
+                ]
             );
 
 
@@ -493,7 +644,9 @@ const register = async (req, res) => {
                 FROM users
                 WHERE employee_code = $1
                 `,
-                [normalizedEmployeeCode]
+                [
+                    normalizedEmployeeCode
+                ]
             );
 
 
@@ -527,24 +680,26 @@ const register = async (req, res) => {
         const result =
             await pool.query(
                 `
-                INSERT INTO users (
-                    employee_code,
-                    name,
-                    email,
-                    role,
-                    password_hash,
-                    is_active,
-                    manager_id
-                )
-                VALUES (
-                    $1,
-                    $2,
-                    $3,
-                    'EMPLOYEE',
-                    $4,
-                    TRUE,
-                    NULL
-                )
+                INSERT INTO users
+                    (
+                        employee_code,
+                        name,
+                        email,
+                        role,
+                        password_hash,
+                        is_active,
+                        manager_id
+                    )
+                VALUES
+                    (
+                        $1,
+                        $2,
+                        $3,
+                        'EMPLOYEE',
+                        $4,
+                        TRUE,
+                        NULL
+                    )
                 RETURNING
                     id,
                     employee_code,
@@ -645,7 +800,9 @@ const forgotPassword = async (req, res) => {
                 FROM users
                 WHERE LOWER(email) = $1
                 `,
-                [normalizedEmail]
+                [
+                    normalizedEmail
+                ]
             );
 
 
@@ -726,7 +883,7 @@ const forgotPassword = async (req, res) => {
         // ----------------------------------------------------
 
         const resetUrl =
-            `http://192.168.29.216:4200/reset-password?token=${resetToken}`;
+            `http://192.168.29.51:4200/reset-password?token=${resetToken}`;
 
 
         // ----------------------------------------------------
@@ -736,7 +893,8 @@ const forgotPassword = async (req, res) => {
         const transporter =
             nodemailer.createTransport({
 
-                service: "gmail",
+                service:
+                    "gmail",
 
                 auth: {
 
@@ -911,7 +1069,9 @@ const resetPassword = async (req, res) => {
                     password_reset_token_hash = $1
                     AND password_reset_expires_at > NOW()
                 `,
-                [tokenHash]
+                [
+                    tokenHash
+                ]
             );
 
 
@@ -996,11 +1156,10 @@ const resetPassword = async (req, res) => {
 
 
 // ============================================================
-// ============================================================
 // FORCE LOGOUT SESSION
 // ============================================================
 // Called when the user clicks OK on the "already logged in on
-// another device" popup.  Marks the existing session inactive
+// another device" popup. Marks the existing session inactive
 // so the next login attempt can proceed.
 // ============================================================
 
@@ -1008,40 +1167,62 @@ const forceLogoutSession = async (req, res) => {
 
     try {
 
-        const { session_id } = req.body;
+        const {
+            session_id
+        } = req.body;
 
 
         if (!session_id) {
 
             return res.status(400).json({
-                message: "session_id is required"
+
+                message:
+                    "session_id is required"
+
             });
 
         }
 
 
         await pool.query(
-            `UPDATE user_sessions
-             SET    is_active          = false,
-                    invalidated_at     = CURRENT_TIMESTAMP,
-                    invalidation_reason = 'forced_logout_by_new_login'
-             WHERE  session_id = $1`,
-            [session_id]
+            `
+            UPDATE user_sessions
+            SET
+                is_active = false,
+                invalidated_at = CURRENT_TIMESTAMP,
+                invalidation_reason = 'forced_logout_by_new_login'
+            WHERE session_id = $1
+            `,
+            [
+                session_id
+            ]
         );
 
 
         return res.status(200).json({
-            message: "Session invalidated successfully"
+
+            message:
+                "Session invalidated successfully"
+
         });
 
 
     } catch (error) {
 
-        console.error("forceLogoutSession error:", error);
+        console.error(
+            "forceLogoutSession error:",
+            error
+        );
+
 
         return res.status(500).json({
-            message: "Failed to invalidate session",
-            error: error.message
+
+            message:
+                "Failed to invalidate session",
+
+            error:
+                error.message
+
         });
 
     }

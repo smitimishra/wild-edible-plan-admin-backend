@@ -22,19 +22,19 @@
                                      "status":  "CRITICAL",
                                      "httpStatus":  200,
                                      "responseTime":  2118.21,
-                                     "url":  "http://192.168.29.216:8200/welcome",
+                                     "url":  "http://192.168.29.51:8200/welcome",
                                      "error":  ""
                                  },
                      "backend":  {
                                      "status":  "UP",
                                      "port":  8080,
                                      "responseTime":  69.72,
-                                     "host":  "192.168.29.216",
+                                     "host":  "192.168.29.51",
                                      "error":  ""
                                  },
                      "database":  {
                                       "status":  "DOWN",
-                                      "host":  "192.168.29.216",
+                                      "host":  "192.168.29.51",
                                       "port":  5432,
                                       "name":  "wildplant",
                                       "user":  "postgres",
