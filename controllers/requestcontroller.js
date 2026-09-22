@@ -58,6 +58,81 @@ const getUserById = async (client, userId) => {
   return result.rows.length > 0 ? result.rows[0] : null;
 };
 
+const getPlantIdentity = (requestData, scientificName) => ({
+  scientificName:
+    scientificName ||
+    requestData.scientific_name ||
+    requestData.scientificName ||
+    null,
+  latitude: requestData.latitude ?? null,
+  longitude: requestData.longitude ?? null,
+});
+
+const findMatchingPlant = async (client, identity) => {
+  if (
+    !identity.scientificName ||
+    identity.latitude == null ||
+    identity.longitude == null
+  ) {
+    return null;
+  }
+
+  const result = await client.query(
+    `SELECT *
+       FROM public.plant_table
+      WHERE LOWER(BTRIM(scientific_name)) = LOWER(BTRIM($1))
+        AND latitude = $2
+        AND longitude = $3
+        AND deleted_at IS NULL
+      ORDER BY version DESC, plant_id DESC
+      LIMIT 1
+      FOR UPDATE;`,
+    [identity.scientificName, identity.latitude, identity.longitude],
+  );
+
+  return result.rows[0] || null;
+};
+
+const insertApprovedPlant = async (client, requestData, scientificName, employeeId, version) => {
+  const attachmentsResult = await client.query(
+    `SELECT id, file_path
+       FROM public.request_attachments
+      WHERE request_id = $1
+      ORDER BY id ASC
+      LIMIT 1;`,
+    [requestData.request_id],
+  );
+  const attachment = attachmentsResult.rows[0] || null;
+
+  const result = await client.query(
+    `INSERT INTO public.plant_table (
+        image_id, scientific_name, common_name, family, habitat, distribution,
+       edible_parts, nutritional_value, flowering_season, conservation_status,
+       image_url, latitude, longitude, uploaded_by, verified_status, created_date,
+       version, deleted_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,TRUE,CURRENT_TIMESTAMP,$15,NULL)
+     RETURNING *;`,
+    [
+      attachment ? Number(attachment.id) : null,
+      scientificName,
+      requestData.common_name || null,
+      requestData.family || null,
+      requestData.habitat || null,
+      requestData.distribution || null,
+      requestData.edible_parts || null,
+      requestData.nutritional_value || null,
+      requestData.flowering_season || null,
+      requestData.conservation_status || null,
+      attachment ? attachment.file_path : requestData.image_url || null,
+      requestData.latitude ?? null,
+      requestData.longitude ?? null,
+      requestData.employee_id || requestData.user_id || null,
+      version,
+    ],
+  );
+  return result.rows[0];
+};
+
 // NORMALIZE REQUEST
 
 const normalizeRequest = (request) => {
@@ -465,6 +540,33 @@ const reviewerApproveRequest = async (req, res) => {
       });
     }
 
+    const duplicateAction = req.body.duplicate_action || null;
+    const candidateRequestData = {
+      ...existingRequestData,
+      scientific_name: scientificName,
+    };
+    const identity = getPlantIdentity(candidateRequestData, scientificName);
+    const matchingPlant = await findMatchingPlant(client, identity);
+
+    if (matchingPlant && !duplicateAction) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+      return res.status(409).json({
+        message: "A plant with the same scientific name and location already exists",
+        code: "DUPLICATE_PLANT",
+        existing_record: matchingPlant,
+      });
+    }
+
+    if (matchingPlant && duplicateAction === "replace") {
+      await client.query(
+        `UPDATE public.plant_table
+            SET deleted_at = CURRENT_TIMESTAMP
+          WHERE plant_id = $1 AND deleted_at IS NULL;`,
+        [matchingPlant.plant_id],
+      );
+    }
+
     const updatedRequestData = {
       ...existingRequestData,
 
@@ -480,6 +582,22 @@ const reviewerApproveRequest = async (req, res) => {
 
       reviewer_approved_at: new Date().toISOString(),
     };
+
+    const plantData = {
+      ...updatedRequestData,
+      request_id: request.id,
+    };
+    const plantVersion =
+      matchingPlant && duplicateAction === "new"
+        ? Number(matchingPlant.version || 1) + 1
+        : 1;
+    const plant = await insertApprovedPlant(
+      client,
+      plantData,
+      scientificName,
+      existingRequestData.employee_id || existingRequestData.user_id,
+      plantVersion,
+    );
 
     // APPROVAL HISTORY
 
@@ -545,6 +663,7 @@ const updateResult = await client.query(
 
         description: updatedRequestData.description || "",
       },
+      plant,
     });
   } catch (error) {
     if (transactionStarted) {
