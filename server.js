@@ -86,7 +86,7 @@ const server =
         () => {
 
             console.log(
-                `Server running on http://192.168.29.217:${PORT}`
+                `Server running on http://192.168.29.71:${PORT}`
             );
 
         }
