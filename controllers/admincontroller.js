@@ -2024,22 +2024,165 @@ const deleteHierarchyLevel = async (req, res) => {
     client.release();
   }
 };
+const getBlockedUsers = async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT
+                user_id,
+                user_name,
+                email_id,
+                blocked_at
+            FROM blocked_users
+            ORDER BY blocked_at DESC
+        `);
 
-// EXPORTS
+        res.status(200).json({
+            count: result.rows.length,
+            blocked_users: result.rows
+        });
+
+    } catch (error) {
+        console.error("Error fetching blocked users:", error);
+
+        res.status(500).json({
+            message: "Failed to fetch blocked users"
+        });
+    }
+};
+
+
+const unblockUser = async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        const result = await pool.query(
+            `DELETE FROM blocked_users
+             WHERE user_id = $1
+             RETURNING user_id`,
+            [userId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                message: "User is not blocked"
+            });
+        }
+
+        res.status(200).json({
+            message: "User unblocked successfully",
+            user_id: result.rows[0].user_id
+        });
+
+    } catch (error) {
+        console.error("Error unblocking user:", error);
+
+        res.status(500).json({
+            message: "Failed to unblock user"
+        });
+    }
+};
+
+
+// ============================================================
+// BLOCK USER
+// ADMIN ONLY
+// ============================================================
+
+const blockUser = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Get user details
+        const userResult = await pool.query(
+            `
+            SELECT
+                user_id,
+                user_name,
+                email_id
+            FROM user_table
+            WHERE user_id = $1
+            `,
+            [id]
+        );
+
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        const user = userResult.rows[0];
+
+        // Check if already blocked
+        const existingBlock = await pool.query(
+            `
+            SELECT user_id
+            FROM blocked_users
+            WHERE user_id = $1
+            `,
+            [id]
+        );
+
+        if (existingBlock.rows.length > 0) {
+            return res.status(409).json({
+                message: "User is already blocked"
+            });
+        }
+
+        // Insert into blocked_users
+        const result = await pool.query(
+            `
+            INSERT INTO blocked_users
+            (
+                user_id,
+                user_name,
+                email_id,
+                blocked_at
+            )
+            VALUES
+            ($1, $2, $3, CURRENT_TIMESTAMP)
+            RETURNING
+                user_id,
+                user_name,
+                email_id,
+                blocked_at
+            `,
+            [
+                user.user_id,
+                user.user_name,
+                user.email_id
+            ]
+        );
+
+        return res.status(201).json({
+            message: "User blocked successfully",
+            blocked_user: result.rows[0]
+        });
+
+    } catch (error) {
+        console.error("Error blocking user:", error);
+
+        return res.status(500).json({
+            message: "Failed to block user"
+        });
+    }
+};
 
 module.exports = {
-  // User management
-  getUsers,
-  createUser,
-  updateUser,
-  deactivateUser,
-  reactivateUser,
-  deleteUser,
-  resetUserPassword,
+    getUsers,
+    createUser,
+    updateUser,
+    deactivateUser,
+    reactivateUser,
+    deleteUser,
+    resetUserPassword,
 
-  // Approval workflow hierarchy
-  getHierarchy,
-  addHierarchyLevel,
-  updateHierarchyLevel,
-  deleteHierarchyLevel,
+    blockUser,
+    getBlockedUsers,
+    unblockUser,
+
+    getHierarchy,
+    addHierarchyLevel,
+    updateHierarchyLevel,
+    deleteHierarchyLevel
 };

@@ -1,5 +1,4 @@
 const express = require("express");
-
 const {
     getUsers,
     createUser,
@@ -8,6 +7,12 @@ const {
     reactivateUser,
     deleteUser,
     resetUserPassword,
+
+    // Blocked users
+    getBlockedUsers,
+    unblockUser,
+    blockUser,
+
 
     getHierarchy,
     addHierarchyLevel,
@@ -268,6 +273,33 @@ router.patch(
     authenticateToken,
     authorizeRoles("ADMIN"),
     updateSetting
+);
+// ============================================================
+// BLOCKED USERS
+// ADMIN ONLY
+// ============================================================
+//Block a user
+router.post(
+    "/blocked-users/:id",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    blockUser
+);
+// GET ALL BLOCKED USERS
+router.get(
+    "/blocked-users",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    getBlockedUsers
+);
+
+
+// UNBLOCK USER
+router.delete(
+    "/blocked-users/:userId",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    unblockUser
 );
 
 

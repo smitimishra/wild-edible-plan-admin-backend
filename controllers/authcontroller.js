@@ -720,7 +720,7 @@ const forgotPassword = async (req, res) => {
         // ----------------------------------------------------
 
         const resetUrl =
-            `http://192.168.29.216:4200/reset-password?token=${resetToken}`;
+            `http://192.168.29.98:4200/reset-password?token=${resetToken}`;
 
 
         // ----------------------------------------------------
