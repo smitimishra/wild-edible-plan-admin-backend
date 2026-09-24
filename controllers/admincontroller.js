@@ -788,6 +788,158 @@ const updateUser = async (req, res) => {
     client.release();
   }
 };
+
+// ============================================================
+// RESET USER PASSWORD
+// ADMIN ONLY
+// ============================================================
+
+const resetUserPassword = async (req, res) => {
+
+    try {
+
+        const userId = Number(req.params.id);
+
+        // ----------------------------------------------------
+        // VALIDATE USER ID
+        // ----------------------------------------------------
+
+        if (!Number.isInteger(userId) || userId <= 0) {
+
+            return res.status(400).json({
+                message: "Invalid user ID"
+            });
+
+        }
+
+
+        const { newPassword } = req.body;
+
+
+        // ----------------------------------------------------
+        // VALIDATE PASSWORD
+        // ----------------------------------------------------
+
+        if (
+            typeof newPassword !== "string" ||
+            !newPassword.trim()
+        ) {
+
+            return res.status(400).json({
+                message: "New password is required"
+            });
+
+        }
+
+
+        if (newPassword.length < 6) {
+
+            return res.status(400).json({
+                message: "Password must be at least 6 characters long"
+            });
+
+        }
+
+
+        // ----------------------------------------------------
+        // CHECK USER EXISTS
+        // ----------------------------------------------------
+
+        const userResult = await pool.query(
+            `
+            SELECT
+                id,
+                name,
+                email,
+                role,
+                is_active
+            FROM users
+            WHERE id = $1
+            `,
+            [
+                userId
+            ]
+        );
+
+
+        if (userResult.rows.length === 0) {
+
+            return res.status(404).json({
+                message: "User not found"
+            });
+
+        }
+
+
+        // ----------------------------------------------------
+        // HASH NEW PASSWORD
+        // ----------------------------------------------------
+
+        const passwordHash =
+            await bcrypt.hash(
+                newPassword,
+                10
+            );
+
+
+        // ----------------------------------------------------
+        // UPDATE PASSWORD
+        // ----------------------------------------------------
+
+        const result = await pool.query(
+            `
+            UPDATE users
+            SET password_hash = $1
+            WHERE id = $2
+            RETURNING
+                id,
+                employee_code,
+                name,
+                email,
+                role,
+                is_active
+            `,
+            [
+                passwordHash,
+                userId
+            ]
+        );
+
+
+        // ----------------------------------------------------
+        // SUCCESS RESPONSE
+        // ----------------------------------------------------
+
+        return res.status(200).json({
+
+            message: "Password reset successfully",
+
+            user: result.rows[0]
+
+        });
+
+
+    } catch (error) {
+
+        console.error(
+            "Admin reset password error:",
+            error
+        );
+
+
+        return res.status(500).json({
+
+            message:
+                "Unable to reset user password"
+
+        });
+
+    }
+
+};
+
+
+// ============================================================
 // DEACTIVATE USER
 
 const deactivateUser = async (req, res) => {
@@ -1777,21 +1929,165 @@ const deleteHierarchyLevel = async (req, res) => {
     client.release();
   }
 };
+const getBlockedUsers = async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT
+                user_id,
+                user_name,
+                email_id,
+                blocked_at
+            FROM blocked_users
+            ORDER BY blocked_at DESC
+        `);
 
-// EXPORTS
+        res.status(200).json({
+            count: result.rows.length,
+            blocked_users: result.rows
+        });
+
+    } catch (error) {
+        console.error("Error fetching blocked users:", error);
+
+        res.status(500).json({
+            message: "Failed to fetch blocked users"
+        });
+    }
+};
+
+
+const unblockUser = async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        const result = await pool.query(
+            `DELETE FROM blocked_users
+             WHERE user_id = $1
+             RETURNING user_id`,
+            [userId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                message: "User is not blocked"
+            });
+        }
+
+        res.status(200).json({
+            message: "User unblocked successfully",
+            user_id: result.rows[0].user_id
+        });
+
+    } catch (error) {
+        console.error("Error unblocking user:", error);
+
+        res.status(500).json({
+            message: "Failed to unblock user"
+        });
+    }
+};
+
+
+// ============================================================
+// BLOCK USER
+// ADMIN ONLY
+// ============================================================
+
+const blockUser = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Get user details
+        const userResult = await pool.query(
+            `
+            SELECT
+                user_id,
+                user_name,
+                email_id
+            FROM user_table
+            WHERE user_id = $1
+            `,
+            [id]
+        );
+
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        const user = userResult.rows[0];
+
+        // Check if already blocked
+        const existingBlock = await pool.query(
+            `
+            SELECT user_id
+            FROM blocked_users
+            WHERE user_id = $1
+            `,
+            [id]
+        );
+
+        if (existingBlock.rows.length > 0) {
+            return res.status(409).json({
+                message: "User is already blocked"
+            });
+        }
+
+        // Insert into blocked_users
+        const result = await pool.query(
+            `
+            INSERT INTO blocked_users
+            (
+                user_id,
+                user_name,
+                email_id,
+                blocked_at
+            )
+            VALUES
+            ($1, $2, $3, CURRENT_TIMESTAMP)
+            RETURNING
+                user_id,
+                user_name,
+                email_id,
+                blocked_at
+            `,
+            [
+                user.user_id,
+                user.user_name,
+                user.email_id
+            ]
+        );
+
+        return res.status(201).json({
+            message: "User blocked successfully",
+            blocked_user: result.rows[0]
+        });
+
+    } catch (error) {
+        console.error("Error blocking user:", error);
+
+        return res.status(500).json({
+            message: "Failed to block user"
+        });
+    }
+};
 
 module.exports = {
-  // User management
-  getUsers,
-  createUser,
-  updateUser,
-  deactivateUser,
-  reactivateUser,
-  deleteUser,
+    getUsers,
+    createUser,
+    updateUser,
+    deactivateUser,
+    reactivateUser,
+    deleteUser,
+    resetUserPassword,
 
-  // Approval workflow hierarchy
-  getHierarchy,
-  addHierarchyLevel,
-  updateHierarchyLevel,
-  deleteHierarchyLevel,
+    blockUser,
+    getBlockedUsers,
+    unblockUser,
+
+    getHierarchy,
+    addHierarchyLevel,
+    updateHierarchyLevel,
+    deleteHierarchyLevel
 };

@@ -1,22 +1,18 @@
 const express = require("express");
-
 const {
-
-    // ========================================================
-    // USER MANAGEMENT
-    // ========================================================
-
     getUsers,
     createUser,
     updateUser,
     deactivateUser,
     reactivateUser,
     deleteUser,
+    resetUserPassword,
 
+    // Blocked users
+    getBlockedUsers,
+    unblockUser,
+    blockUser,
 
-    // ========================================================
-    // APPROVAL WORKFLOW HIERARCHY
-    // ========================================================
 
     getHierarchy,
     addHierarchyLevel,
@@ -240,6 +236,24 @@ router.delete(
 
 );
 
+// ============================================================
+// RESET USER PASSWORD
+// ADMIN ONLY
+// ============================================================
+console.log("REGISTERING RESET PASSWORD ROUTE");
+router.patch(
+
+    "/users/:id/reset-password",
+
+    authenticateToken,
+
+    authorizeRoles("ADMIN"),
+
+    resetUserPassword
+
+);
+
+console.log("RESET PASSWORD ROUTE LOADED");
 
 // ============================================================
 // SYSTEM SETTINGS
@@ -259,6 +273,33 @@ router.patch(
     authenticateToken,
     authorizeRoles("ADMIN"),
     updateSetting
+);
+// ============================================================
+// BLOCKED USERS
+// ADMIN ONLY
+// ============================================================
+//Block a user
+router.post(
+    "/blocked-users/:id",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    blockUser
+);
+// GET ALL BLOCKED USERS
+router.get(
+    "/blocked-users",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    getBlockedUsers
+);
+
+
+// UNBLOCK USER
+router.delete(
+    "/blocked-users/:userId",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    unblockUser
 );
 
 

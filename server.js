@@ -5,14 +5,15 @@ const path = require("path");
 require("dotenv").config({
   path: path.join(__dirname, ".env"),
 });
-
 const pool = require("./config/db");
-
-const requestRoutes = require("./routes/requestRoutes");
+const fieldUserPlantRoutes = require("./routes/fielduserplantroutes");
+const plantRoutes = require("./routes/plantRoutes");
+const requestRoutes = require("./routes/requestroutes");
 const authRoutes = require("./routes/authRoutes");
 const adminRoutes = require("./routes/adminroutes");
 const sessionRoutes = require("./routes/sessionroutes");
 const profileRoutes = require("./routes/profileroutes");
+
 
 const app = express();
 
