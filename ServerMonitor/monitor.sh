@@ -26,9 +26,9 @@
 # CONFIGURATION
 # ============================================================
 
-ANGULAR_URL="http://192.168.29.71:8200/welcome"
+ANGULAR_URL="http://192.168.29.69:8200/welcome"
 
-BACKEND_HOST="192.168.29.71"
+BACKEND_HOST="192.168.29.69"
 BACKEND_PORT=8080
 
 DB_HOST="192.168.29.98"
