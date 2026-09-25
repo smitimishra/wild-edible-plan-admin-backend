@@ -6,80 +6,135 @@ const nodemailer = require("nodemailer");
 const { v4: uuidv4 } = require("uuid");
 const { getNumericSetting } = require("./settingscontroller");
 
+// DEVICE TYPE DETECTION
+// ------------------------------------------------------------
+// Broad, best-effort classification based on the User-Agent
+// string. This is NOT a reliable way to distinguish a physical
+// laptop from a desktop PC — it only buckets known desktop
+// operating systems under "Laptop" to match how this
+// application currently represents desktop devices in the
+// Admin Panel.
 
-// ============================================================
+const getDeviceType = (userAgent) => {
+  if (!userAgent) {
+    return "Browser";
+  }
+
+  const ua = userAgent.toLowerCase();
+
+  // Tablets (check before generic mobile/android matching,
+  // since Android tablets omit "mobile" in their UA string)
+
+  if (
+    ua.includes("ipad") ||
+    ua.includes("tablet") ||
+    (ua.includes("android") && !ua.includes("mobile"))
+  ) {
+    return "Tablet";
+  }
+
+  // Phones
+
+  if (
+    ua.includes("mobile") ||
+    ua.includes("iphone") ||
+    ua.includes("ipod") ||
+    ua.includes("android")
+  ) {
+    return "Mobile";
+  }
+
+  // Desktop operating systems
+
+  if (
+    ua.includes("windows") ||
+    ua.includes("macintosh") ||
+    ua.includes("mac os x") ||
+    ua.includes("linux") ||
+    ua.includes("x11")
+  ) {
+    return "Laptop";
+  }
+
+  // Fallback — could not be classified
+
+  return "Browser";
+};
+
+// CLIENT IP DETECTION
+// ------------------------------------------------------------
+// Only trusts a forwarded IP (X-Forwarded-For) when Express's
+// "trust proxy" setting is actually configured, since that
+// header is otherwise trivially spoofable by the client.
+// Falls back to req.ip (Express's own resolved address) in
+// every other case.
+
+const getClientIp = (req) => {
+  const trustProxyEnabled =
+    req.app && req.app.get && req.app.get("trust proxy");
+
+  if (trustProxyEnabled) {
+    const forwardedFor = req.headers["x-forwarded-for"];
+
+    if (forwardedFor) {
+      const forwardedIp = forwardedFor.split(",")[0].trim();
+
+      if (forwardedIp) {
+        return forwardedIp;
+      }
+    }
+  }
+
+  return req.ip ?? null;
+};
+
 // LOGIN
-// ============================================================
 
 const login = async (req, res) => {
+  try {
+    const { email, password } = req.body;
 
-    try {
+    // VALIDATION
 
-        const {
-            email,
-            password
-        } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({
+        message: "Email and password are required",
+      });
+    }
 
+    const normalizedEmail = email.trim().toLowerCase();
 
-        // ----------------------------------------------------
-        // VALIDATION
-        // ----------------------------------------------------
+    // LOAD LOCKOUT SETTINGS
 
-        if (!email || !password) {
+    const [maxAttempts, lockoutHours] = await Promise.all([
+      getNumericSetting("login_max_attempts", 3),
+      getNumericSetting("login_lockout_hours", 1),
+    ]);
 
-            return res.status(400).json({
+    const windowMs = lockoutHours * 60 * 60 * 1000;
 
-                message:
-                    "Email and password are required"
+    // CHECK IF ACCOUNT IS CURRENTLY LOCKED
+    // Count failed attempts within the lockout window
 
-            });
-
-        }
-
-
-        const normalizedEmail = email.trim().toLowerCase();
-
-
-        // ----------------------------------------------------
-        // LOAD LOCKOUT SETTINGS
-        // ----------------------------------------------------
-
-        const [maxAttempts, lockoutHours] = await Promise.all([
-            getNumericSetting("login_max_attempts", 3),
-            getNumericSetting("login_lockout_hours", 1)
-        ]);
-
-        const windowMs = lockoutHours * 60 * 60 * 1000;
-
-
-        // ----------------------------------------------------
-        // CHECK IF ACCOUNT IS CURRENTLY LOCKED
-        // Count failed attempts within the lockout window
-        // ----------------------------------------------------
-
-        const attemptsResult = await pool.query(
-            `
+    const attemptsResult = await pool.query(
+      `
             SELECT COUNT(*) AS cnt
             FROM login_attempts
             WHERE email = $1
               AND success = FALSE
               AND attempted_at > NOW() - ($2 || ' hours')::INTERVAL
             `,
-            [normalizedEmail, lockoutHours]
-        );
+      [normalizedEmail, lockoutHours],
+    );
 
+    const recentFailed = parseInt(attemptsResult.rows[0].cnt, 10);
 
-        const recentFailed =
-            parseInt(attemptsResult.rows[0].cnt, 10);
+    if (recentFailed >= maxAttempts) {
+      // Find when the lockout window started
+      // (the oldest failed attempt within the window)
 
-
-        if (recentFailed >= maxAttempts) {
-
-            // Find when the lockout window started
-            // (the oldest failed attempt within the window)
-
-            const oldestResult = await pool.query(
-                `
+      const oldestResult = await pool.query(
+        `
                 SELECT attempted_at
                 FROM login_attempts
                 WHERE email = $1
@@ -88,53 +143,35 @@ const login = async (req, res) => {
                 ORDER BY attempted_at ASC
                 LIMIT 1
                 `,
-                [normalizedEmail, lockoutHours]
-            );
+        [normalizedEmail, lockoutHours],
+      );
 
+      const lockedSince = oldestResult.rows[0]?.attempted_at
+        ? new Date(oldestResult.rows[0].attempted_at)
+        : new Date();
 
-            const lockedSince =
-                oldestResult.rows[0]?.attempted_at
-                    ? new Date(oldestResult.rows[0].attempted_at)
-                    : new Date();
+      const unlocksAt = new Date(lockedSince.getTime() + windowMs);
 
+      const minutesLeft = Math.max(
+        1,
+        Math.ceil((unlocksAt.getTime() - Date.now()) / 60000),
+      );
 
-            const unlocksAt =
-                new Date(
-                    lockedSince.getTime() + windowMs
-                );
+      return res.status(429).json({
+        message: "account_locked",
 
+        lockedUntil: unlocksAt.toISOString(),
 
-            const minutesLeft =
-                Math.max(
-                    1,
-                    Math.ceil(
-                        (unlocksAt.getTime() - Date.now()) / 60000
-                    )
-                );
+        minutesLeft,
 
+        lockoutHours,
+      });
+    }
 
-            return res.status(429).json({
+    // FIND USER
 
-                message: "account_locked",
-
-                lockedUntil:
-                    unlocksAt.toISOString(),
-
-                minutesLeft,
-
-                lockoutHours
-
-            });
-
-        }
-
-
-        // ----------------------------------------------------
-        // FIND USER
-        // ----------------------------------------------------
-
-        const result = await pool.query(
-            `
+    const result = await pool.query(
+      `
             SELECT
                 id,
                 employee_code,
@@ -146,124 +183,75 @@ const login = async (req, res) => {
             FROM users
             WHERE LOWER(email) = LOWER($1)
             `,
-            [normalizedEmail]
-        );
+      [normalizedEmail],
+    );
 
+    // USER NOT FOUND — record failed attempt
 
-        // ----------------------------------------------------
-        // USER NOT FOUND — record failed attempt
-        // ----------------------------------------------------
-
-        if (result.rows.length === 0) {
-
-            await pool.query(
-                `INSERT INTO login_attempts
+    if (result.rows.length === 0) {
+      await pool.query(
+        `INSERT INTO login_attempts
                     (email, success, ip_address)
                  VALUES
                     ($1, FALSE, $2)`,
-                [
-                    normalizedEmail,
-                    req.ip ?? null
-                ]
-            );
+        [normalizedEmail, req.ip ?? null],
+      );
 
+      return res.status(401).json({
+        message: "Invalid email or password",
+      });
+    }
 
-            return res.status(401).json({
+    const user = result.rows[0];
 
-                message:
-                    "Invalid email or password"
+    // CHECK ACCOUNT STATUS
 
-            });
+    if (user.is_active === false) {
+      return res.status(403).json({
+        message:
+          "Your account has been deactivated. Please contact the administrator.",
+      });
+    }
 
-        }
+    // CHECK PASSWORD
 
+    const passwordMatch = await bcrypt.compare(password, user.password_hash);
 
-        const user = result.rows[0];
+    if (!passwordMatch) {
+      // Record failed attempt
 
-
-        // ----------------------------------------------------
-        // CHECK ACCOUNT STATUS
-        // ----------------------------------------------------
-
-        if (user.is_active === false) {
-
-            return res.status(403).json({
-
-                message:
-                    "Your account has been deactivated. Please contact the administrator."
-
-            });
-
-        }
-
-
-        // ----------------------------------------------------
-        // CHECK PASSWORD
-        // ----------------------------------------------------
-
-        const passwordMatch =
-            await bcrypt.compare(
-                password,
-                user.password_hash
-            );
-
-
-        if (!passwordMatch) {
-
-            // Record failed attempt
-
-            await pool.query(
-                `INSERT INTO login_attempts
+      await pool.query(
+        `INSERT INTO login_attempts
                     (email, success, ip_address)
                  VALUES
                     ($1, FALSE, $2)`,
-                [
-                    normalizedEmail,
-                    req.ip ?? null
-                ]
-            );
+        [normalizedEmail, req.ip ?? null],
+      );
 
+      // Count again after recording to give accurate
+      // "attempts left"
 
-            // Count again after recording to give accurate
-            // "attempts left"
-
-            const afterResult = await pool.query(
-                `
+      const afterResult = await pool.query(
+        `
                 SELECT COUNT(*) AS cnt
                 FROM login_attempts
                 WHERE email = $1
                   AND success = FALSE
                   AND attempted_at > NOW() - ($2 || ' hours')::INTERVAL
                 `,
-                [
-                    normalizedEmail,
-                    lockoutHours
-                ]
-            );
+        [normalizedEmail, lockoutHours],
+      );
 
+      const totalFailed = parseInt(afterResult.rows[0].cnt, 10);
 
-            const totalFailed =
-                parseInt(
-                    afterResult.rows[0].cnt,
-                    10
-                );
+      const attemptsLeft = Math.max(0, maxAttempts - totalFailed);
 
+      if (attemptsLeft === 0) {
+        // Just got locked — find the lockout
+        // start time
 
-            const attemptsLeft =
-                Math.max(
-                    0,
-                    maxAttempts - totalFailed
-                );
-
-
-            if (attemptsLeft === 0) {
-
-                // Just got locked — find the lockout
-                // start time
-
-                const oldestResult2 =
-                    await pool.query(
-                        `
+        const oldestResult2 = await pool.query(
+          `
                         SELECT attempted_at
                         FROM login_attempts
                         WHERE email = $1
@@ -272,66 +260,37 @@ const login = async (req, res) => {
                         ORDER BY attempted_at ASC
                         LIMIT 1
                         `,
-                        [
-                            normalizedEmail,
-                            lockoutHours
-                        ]
-                    );
+          [normalizedEmail, lockoutHours],
+        );
 
+        const lockedSince2 = oldestResult2.rows[0]?.attempted_at
+          ? new Date(oldestResult2.rows[0].attempted_at)
+          : new Date();
 
-                const lockedSince2 =
-                    oldestResult2.rows[0]?.attempted_at
-                        ? new Date(
-                            oldestResult2.rows[0].attempted_at
-                        )
-                        : new Date();
+        const unlocksAt2 = new Date(lockedSince2.getTime() + windowMs);
 
+        return res.status(429).json({
+          message: "account_locked",
 
-                const unlocksAt2 =
-                    new Date(
-                        lockedSince2.getTime() + windowMs
-                    );
+          lockedUntil: unlocksAt2.toISOString(),
 
+          minutesLeft: Math.ceil(lockoutHours * 60),
 
-                return res.status(429).json({
+          lockoutHours,
+        });
+      }
 
-                    message:
-                        "account_locked",
+      return res.status(401).json({
+        message: "Invalid email or password",
 
-                    lockedUntil:
-                        unlocksAt2.toISOString(),
+        attemptsLeft,
+      });
+    }
 
-                    minutesLeft:
-                        Math.ceil(
-                            lockoutHours * 60
-                        ),
+    // CHECK FOR EXISTING ACTIVE SESSION
 
-                    lockoutHours
-
-                });
-
-            }
-
-
-            return res.status(401).json({
-
-                message:
-                    "Invalid email or password",
-
-                attemptsLeft
-
-            });
-
-        }
-
-
-        // ----------------------------------------------------
-        // CHECK FOR EXISTING ACTIVE SESSION
-        // ----------------------------------------------------
-
-        const existingSession =
-            await pool.query(
-                `
+    const existingSession = await pool.query(
+      `
                 SELECT
                     id,
                     session_id
@@ -341,116 +300,80 @@ const login = async (req, res) => {
                 ORDER BY created_at DESC
                 LIMIT 1
                 `,
-                [user.id]
-            );
+      [user.id],
+    );
 
+    if (existingSession.rows.length > 0) {
+      return res.status(409).json({
+        message: "active_session_exists",
 
-        if (existingSession.rows.length > 0) {
+        existing_session_id: existingSession.rows[0].session_id,
+      });
+    }
 
-            return res.status(409).json({
+    // RECORD SUCCESSFUL ATTEMPT — clear lockout window
 
-                message:
-                    "active_session_exists",
-
-                existing_session_id:
-                    existingSession.rows[0].session_id
-
-            });
-
-        }
-
-
-        // ----------------------------------------------------
-        // RECORD SUCCESSFUL ATTEMPT — clear lockout window
-        // ----------------------------------------------------
-
-        await pool.query(
-            `INSERT INTO login_attempts
+    await pool.query(
+      `INSERT INTO login_attempts
                 (email, success, ip_address)
              VALUES
                 ($1, TRUE, $2)`,
-            [
-                normalizedEmail,
-                req.ip ?? null
-            ]
-        );
+      [normalizedEmail, req.ip ?? null],
+    );
 
+    // CREATE JWT
 
-        // ----------------------------------------------------
-        // CREATE JWT
-        // ----------------------------------------------------
+    const sessionId = uuidv4();
 
-        const sessionId =
-            uuidv4();
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
 
+    // IMPORTANT:
+    // Login credentials remain ONLY email + password.
+    //
+    // The name comes from the database user record and is
+    // included ONLY in the JWT payload.
 
-        const expiresAt =
-            new Date(
-                Date.now() + 60 * 60 * 1000
-            );
+    console.log("LOGIN USER NAME BEFORE JWT:", user.name);
 
+    const jwtName = user.name ?? user.user_name ?? user.username ?? "";
 
-        // ----------------------------------------------------
-        // IMPORTANT:
-        // Login credentials remain ONLY email + password.
-        //
-        // The name comes from the database user record and is
-        // included ONLY in the JWT payload.
-        // ----------------------------------------------------
+    console.log("LOGIN JWT NAME VALUE:", jwtName);
 
-        console.log(
-            "LOGIN USER NAME BEFORE JWT:",
-            user.name
-        );
+    const token = jwt.sign(
+      {
+        id: user.id,
 
+        name: jwtName,
 
-        const jwtName =
-            user.name ??
-            user.user_name ??
-            user.username ??
-            "";
+        email: user.email,
 
+        role: user.role,
 
-        console.log(
-            "LOGIN JWT NAME VALUE:",
-            jwtName
-        );
+        session_id: sessionId,
+      },
 
+      process.env.JWT_SECRET,
 
-        const token =
-            jwt.sign(
-                {
-                    id:
-                        user.id,
+      {
+        expiresIn: "1h",
+      },
+    );
 
-                    name:
-                        jwtName,
+    // DETECT DEVICE TYPE + IP ADDRESS FOR THIS SESSION
 
-                    email:
-                        user.email,
+    const deviceType = getDeviceType(req.headers["user-agent"]);
 
-                    role:
-                        user.role,
+    const ipAddress = getClientIp(req);
 
-                    session_id:
-                        sessionId
-                },
+    console.log("Creating login session:", {
+      deviceType,
+      ipAddress,
+    });
 
-                process.env.JWT_SECRET,
+    // RECORD SESSION IN user_sessions TABLE
 
-                {
-                    expiresIn:
-                        "1h"
-                }
-            );
-
-
-        // ----------------------------------------------------
-        // RECORD SESSION IN user_sessions TABLE
-        // ----------------------------------------------------
-
-        await pool.query(
-            `
+    await pool.query(
+      `
             INSERT INTO user_sessions
                 (
                     user_id,
@@ -458,7 +381,9 @@ const login = async (req, res) => {
                     is_active,
                     created_at,
                     last_activity,
-                    expires_at
+                    expires_at,
+                    device_type,
+                    ip_address
                 )
             VALUES
                 (
@@ -467,219 +392,118 @@ const login = async (req, res) => {
                     true,
                     CURRENT_TIMESTAMP,
                     CURRENT_TIMESTAMP,
-                    $3
+                    $3,
+                    $4,
+                    $5
                 )
             `,
-            [
-                user.id,
-                sessionId,
-                expiresAt
-            ]
-        );
+      [user.id, sessionId, expiresAt, deviceType, ipAddress],
+    );
 
+    // LOGIN RESPONSE
 
-        // ----------------------------------------------------
-        // LOGIN RESPONSE
-        // ----------------------------------------------------
+    return res.status(200).json({
+      message: "Login successful",
 
-        return res.status(200).json({
+      token,
 
-            message:
-                "Login successful",
+      user: {
+        id: user.id,
 
-            token,
+        employee_code: user.employee_code,
 
-            user: {
+        name: jwtName,
 
-                id:
-                    user.id,
+        email: user.email,
 
-                employee_code:
-                    user.employee_code,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    console.error("Login error:", error);
 
-                name:
-                    jwtName,
+    return res.status(500).json({
+      message: "Login failed",
 
-                email:
-                    user.email,
-
-                role:
-                    user.role
-
-            }
-
-        });
-
-
-    } catch (error) {
-
-        console.error(
-            "Login error:",
-            error
-        );
-
-
-        return res.status(500).json({
-
-            message:
-                "Login failed",
-
-            error:
-                error.message
-
-        });
-
-    }
-
+      error: error.message,
+    });
+  }
 };
 
-
-// ============================================================
 // REGISTER
-// ============================================================
 
 // NOTE:
 // Registration creates normal EMPLOYEE accounts.
 // ADMIN creates MANAGER / HR accounts through the Admin panel.
-// ============================================================
 
 const register = async (req, res) => {
+  try {
+    const { employee_code, name, email, password } = req.body;
 
-    try {
+    // VALIDATION
 
-        const {
-            employee_code,
-            name,
-            email,
-            password
-        } = req.body;
+    if (!employee_code || !name || !email || !password) {
+      return res.status(400).json({
+        message: "Employee code, name, email and password are required",
+      });
+    }
 
+    if (password.length < 6) {
+      return res.status(400).json({
+        message: "Password must be at least 6 characters long",
+      });
+    }
 
-        // ----------------------------------------------------
-        // VALIDATION
-        // ----------------------------------------------------
+    // NORMALIZE VALUES
 
-        if (
-            !employee_code ||
-            !name ||
-            !email ||
-            !password
-        ) {
+    const normalizedEmployeeCode = employee_code.trim();
 
-            return res.status(400).json({
+    const normalizedName = name.trim();
 
-                message:
-                    "Employee code, name, email and password are required"
+    const normalizedEmail = email.trim().toLowerCase();
 
-            });
+    // CHECK EXISTING EMAIL
 
-        }
-
-
-        if (password.length < 6) {
-
-            return res.status(400).json({
-
-                message:
-                    "Password must be at least 6 characters long"
-
-            });
-
-        }
-
-
-        // ----------------------------------------------------
-        // NORMALIZE VALUES
-        // ----------------------------------------------------
-
-        const normalizedEmployeeCode =
-            employee_code.trim();
-
-
-        const normalizedName =
-            name.trim();
-
-
-        const normalizedEmail =
-            email.trim().toLowerCase();
-
-
-        // ----------------------------------------------------
-        // CHECK EXISTING EMAIL
-        // ----------------------------------------------------
-
-        const existingEmail =
-            await pool.query(
-                `
+    const existingEmail = await pool.query(
+      `
                 SELECT id
                 FROM users
                 WHERE LOWER(email) = $1
                 `,
-                [
-                    normalizedEmail
-                ]
-            );
+      [normalizedEmail],
+    );
 
+    if (existingEmail.rows.length > 0) {
+      return res.status(409).json({
+        message: "A user with this email already exists",
+      });
+    }
 
-        if (existingEmail.rows.length > 0) {
+    // CHECK EXISTING EMPLOYEE CODE
 
-            return res.status(409).json({
-
-                message:
-                    "A user with this email already exists"
-
-            });
-
-        }
-
-
-        // ----------------------------------------------------
-        // CHECK EXISTING EMPLOYEE CODE
-        // ----------------------------------------------------
-
-        const existingEmployeeCode =
-            await pool.query(
-                `
+    const existingEmployeeCode = await pool.query(
+      `
                 SELECT id
                 FROM users
                 WHERE employee_code = $1
                 `,
-                [
-                    normalizedEmployeeCode
-                ]
-            );
+      [normalizedEmployeeCode],
+    );
 
+    if (existingEmployeeCode.rows.length > 0) {
+      return res.status(409).json({
+        message: "A user with this employee code already exists",
+      });
+    }
 
-        if (existingEmployeeCode.rows.length > 0) {
+    // HASH PASSWORD
 
-            return res.status(409).json({
+    const passwordHash = await bcrypt.hash(password, 10);
 
-                message:
-                    "A user with this employee code already exists"
+    // CREATE EMPLOYEE
 
-            });
-
-        }
-
-
-        // ----------------------------------------------------
-        // HASH PASSWORD
-        // ----------------------------------------------------
-
-        const passwordHash =
-            await bcrypt.hash(
-                password,
-                10
-            );
-
-
-        // ----------------------------------------------------
-        // CREATE EMPLOYEE
-        // ----------------------------------------------------
-
-        const result =
-            await pool.query(
-                `
+    const result = await pool.query(
+      `
                 INSERT INTO users
                     (
                         employee_code,
@@ -710,221 +534,120 @@ const register = async (req, res) => {
                     manager_id,
                     created_at
                 `,
-                [
-                    normalizedEmployeeCode,
-                    normalizedName,
-                    normalizedEmail,
-                    passwordHash
-                ]
-            );
+      [normalizedEmployeeCode, normalizedName, normalizedEmail, passwordHash],
+    );
 
+    // RESPONSE
 
-        // ----------------------------------------------------
-        // RESPONSE
-        // ----------------------------------------------------
+    return res.status(201).json({
+      message: "Employee registered successfully",
 
-        return res.status(201).json({
+      user: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Register error:", error);
 
-            message:
-                "Employee registered successfully",
-
-            user:
-                result.rows[0]
-
-        });
-
-
-    } catch (error) {
-
-        console.error(
-            "Register error:",
-            error
-        );
-
-
-        return res.status(500).json({
-
-            message:
-                "Unable to register user"
-
-        });
-
-    }
-
+    return res.status(500).json({
+      message: "Unable to register user",
+    });
+  }
 };
 
-
-// ============================================================
 // FORGOT PASSWORD
-// ============================================================
 
 const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
 
-    try {
+    // VALIDATION
 
-        const {
-            email
-        } = req.body;
+    if (!email) {
+      return res.status(400).json({
+        message: "Email is required",
+      });
+    }
 
+    const normalizedEmail = email.trim().toLowerCase();
 
-        // ----------------------------------------------------
-        // VALIDATION
-        // ----------------------------------------------------
+    // FIND USER
 
-        if (!email) {
-
-            return res.status(400).json({
-
-                message:
-                    "Email is required"
-
-            });
-
-        }
-
-
-        const normalizedEmail =
-            email.trim().toLowerCase();
-
-
-        // ----------------------------------------------------
-        // FIND USER
-        // ----------------------------------------------------
-
-        const result =
-            await pool.query(
-                `
+    const result = await pool.query(
+      `
                 SELECT
                     id,
                     email
                 FROM users
                 WHERE LOWER(email) = $1
                 `,
-                [
-                    normalizedEmail
-                ]
-            );
+      [normalizedEmail],
+    );
 
+    // SAME RESPONSE WHETHER USER EXISTS OR NOT
 
-        // ----------------------------------------------------
-        // SAME RESPONSE WHETHER USER EXISTS OR NOT
-        // ----------------------------------------------------
+    if (result.rows.length === 0) {
+      return res.status(200).json({
+        message:
+          "If an account exists with this email, a password reset link has been sent.",
+      });
+    }
 
-        if (result.rows.length === 0) {
+    const user = result.rows[0];
 
-            return res.status(200).json({
+    // GENERATE RESET TOKEN
 
-                message:
-                    "If an account exists with this email, a password reset link has been sent."
+    const resetToken = crypto.randomBytes(32).toString("hex");
 
-            });
+    // HASH RESET TOKEN
 
-        }
+    const resetTokenHash = crypto
+      .createHash("sha256")
+      .update(resetToken)
+      .digest("hex");
 
+    // TOKEN EXPIRATION
+    // 15 MINUTES
 
-        const user =
-            result.rows[0];
+    const resetExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
+    // SAVE TOKEN
 
-        // ----------------------------------------------------
-        // GENERATE RESET TOKEN
-        // ----------------------------------------------------
-
-        const resetToken =
-            crypto
-                .randomBytes(32)
-                .toString("hex");
-
-
-        // ----------------------------------------------------
-        // HASH RESET TOKEN
-        // ----------------------------------------------------
-
-        const resetTokenHash =
-            crypto
-                .createHash("sha256")
-                .update(resetToken)
-                .digest("hex");
-
-
-        // ----------------------------------------------------
-        // TOKEN EXPIRATION
-        // 15 MINUTES
-        // ----------------------------------------------------
-
-        const resetExpiresAt =
-            new Date(
-                Date.now() + 15 * 60 * 1000
-            );
-
-
-        // ----------------------------------------------------
-        // SAVE TOKEN
-        // ----------------------------------------------------
-
-        await pool.query(
-            `
+    await pool.query(
+      `
             UPDATE users
             SET
                 password_reset_token_hash = $1,
                 password_reset_expires_at = $2
             WHERE id = $3
             `,
-            [
-                resetTokenHash,
-                resetExpiresAt,
-                user.id
-            ]
-        );
+      [resetTokenHash, resetExpiresAt, user.id],
+    );
 
+    // RESET URL
 
-        // ----------------------------------------------------
-        // RESET URL
-        // ----------------------------------------------------
+    const resetUrl = `http://192.168.29.51:4200/reset-password?token=${resetToken}`;
 
-        const resetUrl =
-            `http://192.168.29.51:4200/reset-password?token=${resetToken}`;
+    // EMAIL TRANSPORTER
 
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
 
-        // ----------------------------------------------------
-        // EMAIL TRANSPORTER
-        // ----------------------------------------------------
+      auth: {
+        user: process.env.EMAIL_USER,
 
-        const transporter =
-            nodemailer.createTransport({
+        pass: process.env.EMAIL_APP_PASSWORD,
+      },
+    });
 
-                service:
-                    "gmail",
+    // SEND EMAIL
 
-                auth: {
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
 
-                    user:
-                        process.env.EMAIL_USER,
+      to: normalizedEmail,
 
-                    pass:
-                        process.env.EMAIL_APP_PASSWORD
+      subject: "Password Reset - Plant Approval Workflow",
 
-                }
-
-            });
-
-
-        // ----------------------------------------------------
-        // SEND EMAIL
-        // ----------------------------------------------------
-
-        await transporter.sendMail({
-
-            from:
-                process.env.EMAIL_USER,
-
-            to:
-                normalizedEmail,
-
-            subject:
-                "Password Reset - Plant Approval Workflow",
-
-            html: `
+      html: `
                 <div style="font-family: Arial, sans-serif; line-height: 1.6;">
 
                     <h2>
@@ -940,7 +663,7 @@ const forgotPassword = async (req, res) => {
                     </p>
 
                     <p>
-                        <a
+                        
                             href="${resetUrl}"
                             style="
                                 display:inline-block;
@@ -965,103 +688,52 @@ const forgotPassword = async (req, res) => {
                     </p>
 
                 </div>
-            `
+            `,
+    });
 
-        });
+    // RESPONSE
 
+    return res.status(200).json({
+      message:
+        "If an account exists with this email, a password reset link has been sent.",
+    });
+  } catch (error) {
+    console.error("Forgot password error:", error);
 
-        // ----------------------------------------------------
-        // RESPONSE
-        // ----------------------------------------------------
-
-        return res.status(200).json({
-
-            message:
-                "If an account exists with this email, a password reset link has been sent."
-
-        });
-
-
-    } catch (error) {
-
-        console.error(
-            "Forgot password error:",
-            error
-        );
-
-
-        return res.status(500).json({
-
-            message:
-                "Unable to process password reset request"
-
-        });
-
-    }
-
+    return res.status(500).json({
+      message: "Unable to process password reset request",
+    });
+  }
 };
 
-
-// ============================================================
 // RESET PASSWORD
-// ============================================================
 
 const resetPassword = async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
 
-    try {
+    // VALIDATION
 
-        const {
-            token,
-            newPassword
-        } = req.body;
+    if (!token || !newPassword) {
+      return res.status(400).json({
+        message: "Token and new password are required",
+      });
+    }
 
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        message: "Password must be at least 6 characters long",
+      });
+    }
 
-        // ----------------------------------------------------
-        // VALIDATION
-        // ----------------------------------------------------
+    // HASH TOKEN
 
-        if (!token || !newPassword) {
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
-            return res.status(400).json({
+    // FIND VALID TOKEN
 
-                message:
-                    "Token and new password are required"
-
-            });
-
-        }
-
-
-        if (newPassword.length < 6) {
-
-            return res.status(400).json({
-
-                message:
-                    "Password must be at least 6 characters long"
-
-            });
-
-        }
-
-
-        // ----------------------------------------------------
-        // HASH TOKEN
-        // ----------------------------------------------------
-
-        const tokenHash =
-            crypto
-                .createHash("sha256")
-                .update(token)
-                .digest("hex");
-
-
-        // ----------------------------------------------------
-        // FIND VALID TOKEN
-        // ----------------------------------------------------
-
-        const result =
-            await pool.query(
-                `
+    const result = await pool.query(
+      `
                 SELECT
                     id
                 FROM users
@@ -1069,46 +741,26 @@ const resetPassword = async (req, res) => {
                     password_reset_token_hash = $1
                     AND password_reset_expires_at > NOW()
                 `,
-                [
-                    tokenHash
-                ]
-            );
+      [tokenHash],
+    );
 
+    if (result.rows.length === 0) {
+      return res.status(400).json({
+        message: "Invalid or expired password reset token",
+      });
+    }
 
-        if (result.rows.length === 0) {
+    const userId = result.rows[0].id;
 
-            return res.status(400).json({
+    // HASH NEW PASSWORD
 
-                message:
-                    "Invalid or expired password reset token"
+    const passwordHash = await bcrypt.hash(newPassword, 10);
 
-            });
+    // UPDATE PASSWORD
+    // CLEAR RESET TOKEN
 
-        }
-
-
-        const userId =
-            result.rows[0].id;
-
-
-        // ----------------------------------------------------
-        // HASH NEW PASSWORD
-        // ----------------------------------------------------
-
-        const passwordHash =
-            await bcrypt.hash(
-                newPassword,
-                10
-            );
-
-
-        // ----------------------------------------------------
-        // UPDATE PASSWORD
-        // CLEAR RESET TOKEN
-        // ----------------------------------------------------
-
-        await pool.query(
-            `
+    await pool.query(
+      `
             UPDATE users
             SET
                 password_hash = $1,
@@ -1116,76 +768,40 @@ const resetPassword = async (req, res) => {
                 password_reset_expires_at = NULL
             WHERE id = $2
             `,
-            [
-                passwordHash,
-                userId
-            ]
-        );
+      [passwordHash, userId],
+    );
 
+    // RESPONSE
 
-        // ----------------------------------------------------
-        // RESPONSE
-        // ----------------------------------------------------
+    return res.status(200).json({
+      message: "Password reset successfully",
+    });
+  } catch (error) {
+    console.error("Reset password error:", error);
 
-        return res.status(200).json({
-
-            message:
-                "Password reset successfully"
-
-        });
-
-
-    } catch (error) {
-
-        console.error(
-            "Reset password error:",
-            error
-        );
-
-
-        return res.status(500).json({
-
-            message:
-                "Unable to reset password"
-
-        });
-
-    }
-
+    return res.status(500).json({
+      message: "Unable to reset password",
+    });
+  }
 };
 
-
-// ============================================================
 // FORCE LOGOUT SESSION
-// ============================================================
 // Called when the user clicks OK on the "already logged in on
 // another device" popup. Marks the existing session inactive
 // so the next login attempt can proceed.
-// ============================================================
 
 const forceLogoutSession = async (req, res) => {
+  try {
+    const { session_id } = req.body;
 
-    try {
+    if (!session_id) {
+      return res.status(400).json({
+        message: "session_id is required",
+      });
+    }
 
-        const {
-            session_id
-        } = req.body;
-
-
-        if (!session_id) {
-
-            return res.status(400).json({
-
-                message:
-                    "session_id is required"
-
-            });
-
-        }
-
-
-        await pool.query(
-            `
+    await pool.query(
+      `
             UPDATE user_sessions
             SET
                 is_active = false,
@@ -1193,53 +809,29 @@ const forceLogoutSession = async (req, res) => {
                 invalidation_reason = 'forced_logout_by_new_login'
             WHERE session_id = $1
             `,
-            [
-                session_id
-            ]
-        );
+      [session_id],
+    );
 
+    return res.status(200).json({
+      message: "Session invalidated successfully",
+    });
+  } catch (error) {
+    console.error("forceLogoutSession error:", error);
 
-        return res.status(200).json({
+    return res.status(500).json({
+      message: "Failed to invalidate session",
 
-            message:
-                "Session invalidated successfully"
-
-        });
-
-
-    } catch (error) {
-
-        console.error(
-            "forceLogoutSession error:",
-            error
-        );
-
-
-        return res.status(500).json({
-
-            message:
-                "Failed to invalidate session",
-
-            error:
-                error.message
-
-        });
-
-    }
-
+      error: error.message,
+    });
+  }
 };
 
-
-// ============================================================
 // EXPORTS
-// ============================================================
 
 module.exports = {
-
-    login,
-    register,
-    forgotPassword,
-    resetPassword,
-    forceLogoutSession
-
+  login,
+  register,
+  forgotPassword,
+  resetPassword,
+  forceLogoutSession,
 };

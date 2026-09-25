@@ -1030,6 +1030,681 @@ const deleteUser = async (req, res) => {
   }
 };
 
+// ============================================================
+// PLANT MANAGEMENT
+// ============================================================
+
+// GET ALL ACTIVE PLANTS
+// ADMIN ONLY
+//
+// Returns all plant records currently stored in plant_table.
+// Soft-deleted plants are excluded.
+
+const getPlants = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+        SELECT
+          plant_id,
+          image_id,
+          scientific_name,
+          common_name,
+          family,
+          habitat,
+          distribution,
+          edible_parts,
+          nutritional_value,
+          flowering_season,
+          conservation_status,
+          image_url,
+          latitude,
+          longitude,
+          uploaded_by,
+          verified_status,
+          created_date,
+          image_mime_type,
+          source_plant_id,
+          version,
+          deleted_at
+        FROM public.plant_table
+        WHERE deleted_at IS NULL
+        ORDER BY plant_id DESC
+      `
+    );
+
+    return res.status(200).json({
+      message: "Plants retrieved successfully",
+      count: result.rows.length,
+      plants: result.rows,
+    });
+  } catch (error) {
+    console.error("Admin get plants error:", error);
+
+    return res.status(500).json({
+      message: "Unable to retrieve plants",
+      error:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : undefined,
+    });
+  }
+};
+
+
+// ============================================================
+// GET ONE ACTIVE PLANT
+// ADMIN ONLY
+// ============================================================
+
+const getPlantById = async (req, res) => {
+  try {
+    const plantId = Number(req.params.id);
+
+    if (!Number.isInteger(plantId) || plantId <= 0) {
+      return res.status(400).json({
+        message: "Invalid plant ID",
+      });
+    }
+
+    const result = await pool.query(
+      `
+        SELECT
+          plant_id,
+          image_id,
+          scientific_name,
+          common_name,
+          family,
+          habitat,
+          distribution,
+          edible_parts,
+          nutritional_value,
+          flowering_season,
+          conservation_status,
+          image_url,
+          latitude,
+          longitude,
+          uploaded_by,
+          verified_status,
+          created_date,
+          image_mime_type,
+          source_plant_id,
+          version,
+          deleted_at
+        FROM public.plant_table
+        WHERE plant_id = $1
+          AND deleted_at IS NULL
+      `,
+      [plantId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        message: "Plant not found",
+      });
+    }
+
+    return res.status(200).json({
+      message: "Plant retrieved successfully",
+      plant: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Admin get plant error:", error);
+
+    return res.status(500).json({
+      message: "Unable to retrieve plant",
+      error:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : undefined,
+    });
+  }
+};
+
+
+// ============================================================
+// UPDATE PLANT
+// ADMIN ONLY
+//
+// Only fields supplied by the Admin are updated.
+// Existing values are preserved when a field is not supplied.
+// ============================================================
+
+const updatePlant = async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const plantId = Number(req.params.id);
+
+    if (!Number.isInteger(plantId) || plantId <= 0) {
+      return res.status(400).json({
+        message: "Invalid plant ID",
+      });
+    }
+
+    const {
+      scientific_name,
+      common_name,
+      family,
+      habitat,
+      distribution,
+      edible_parts,
+      nutritional_value,
+      flowering_season,
+      conservation_status,
+      image_url,
+      latitude,
+      longitude,
+      verified_status,
+    } = req.body;
+
+    await client.query("BEGIN");
+
+    // Lock the plant record before updating it.
+    const existingResult = await client.query(
+      `
+        SELECT *
+        FROM public.plant_table
+        WHERE plant_id = $1
+          AND deleted_at IS NULL
+        FOR UPDATE
+      `,
+      [plantId]
+    );
+
+    if (existingResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        message: "Plant not found",
+      });
+    }
+
+    const existingPlant = existingResult.rows[0];
+
+    // Keep existing values when a field was not supplied.
+    const finalScientificName =
+      scientific_name !== undefined
+        ? scientific_name
+        : existingPlant.scientific_name;
+
+    const finalCommonName =
+      common_name !== undefined
+        ? common_name
+        : existingPlant.common_name;
+
+    const finalFamily =
+      family !== undefined
+        ? family
+        : existingPlant.family;
+
+    const finalHabitat =
+      habitat !== undefined
+        ? habitat
+        : existingPlant.habitat;
+
+    const finalDistribution =
+      distribution !== undefined
+        ? distribution
+        : existingPlant.distribution;
+
+    const finalEdibleParts =
+      edible_parts !== undefined
+        ? edible_parts
+        : existingPlant.edible_parts;
+
+    const finalNutritionalValue =
+      nutritional_value !== undefined
+        ? nutritional_value
+        : existingPlant.nutritional_value;
+
+    const finalFloweringSeason =
+      flowering_season !== undefined
+        ? flowering_season
+        : existingPlant.flowering_season;
+
+    const finalConservationStatus =
+      conservation_status !== undefined
+        ? conservation_status
+        : existingPlant.conservation_status;
+
+    const finalImageUrl =
+      image_url !== undefined
+        ? image_url
+        : existingPlant.image_url;
+
+    const finalLatitude =
+      latitude !== undefined
+        ? latitude
+        : existingPlant.latitude;
+
+    const finalLongitude =
+      longitude !== undefined
+        ? longitude
+        : existingPlant.longitude;
+
+    const finalVerifiedStatus =
+      verified_status !== undefined
+        ? verified_status
+        : existingPlant.verified_status;
+
+    const result = await client.query(
+      `
+        UPDATE public.plant_table
+        SET
+          scientific_name = $1,
+          common_name = $2,
+          family = $3,
+          habitat = $4,
+          distribution = $5,
+          edible_parts = $6,
+          nutritional_value = $7,
+          flowering_season = $8,
+          conservation_status = $9,
+          image_url = $10,
+          latitude = $11,
+          longitude = $12,
+          verified_status = $13,
+          version = COALESCE(version, 1) + 1
+        WHERE plant_id = $14
+          AND deleted_at IS NULL
+        RETURNING
+          plant_id,
+          image_id,
+          scientific_name,
+          common_name,
+          family,
+          habitat,
+          distribution,
+          edible_parts,
+          nutritional_value,
+          flowering_season,
+          conservation_status,
+          image_url,
+          latitude,
+          longitude,
+          uploaded_by,
+          verified_status,
+          created_date,
+          image_mime_type,
+          source_plant_id,
+          version,
+          deleted_at
+      `,
+      [
+        finalScientificName,
+        finalCommonName,
+        finalFamily,
+        finalHabitat,
+        finalDistribution,
+        finalEdibleParts,
+        finalNutritionalValue,
+        finalFloweringSeason,
+        finalConservationStatus,
+        finalImageUrl,
+        finalLatitude,
+        finalLongitude,
+        finalVerifiedStatus,
+        plantId,
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    return res.status(200).json({
+      message: "Plant updated successfully",
+      plant: result.rows[0],
+    });
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.error(
+        "Admin update plant rollback error:",
+        rollbackError
+      );
+    }
+
+    console.error("Admin update plant error:", error);
+
+    return res.status(500).json({
+      message: "Unable to update plant",
+      error:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : undefined,
+    });
+  } finally {
+    client.release();
+  }
+};
+
+
+// ============================================================
+// SOFT DELETE PLANT
+// ADMIN ONLY
+//
+// The record remains in plant_table.
+// It becomes eligible for Permanent Delete.
+// ============================================================
+
+const deletePlant = async (req, res) => {
+  try {
+    const plantId = Number(req.params.id);
+
+    if (!Number.isInteger(plantId) || plantId <= 0) {
+      return res.status(400).json({
+        message: "Invalid plant ID",
+      });
+    }
+
+    const result = await pool.query(
+      `
+        UPDATE public.plant_table
+        SET
+          deleted_at = CURRENT_TIMESTAMP
+        WHERE plant_id = $1
+          AND deleted_at IS NULL
+        RETURNING
+          plant_id,
+          scientific_name,
+          common_name,
+          image_id,
+          image_url,
+          deleted_at
+      `,
+      [plantId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        message: "Plant not found or already deleted",
+      });
+    }
+
+    return res.status(200).json({
+      message: "Plant deleted successfully",
+      plant: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Admin delete plant error:", error);
+
+    return res.status(500).json({
+      message: "Unable to delete plant",
+      error:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : undefined,
+    });
+  }
+};
+
+// ============================================================
+// PERMANENT DELETE - PLANT CONTENT
+// ============================================================
+//
+// Only soft-deleted plants are eligible for permanent deletion.
+// Related observations and navigation history are deleted first.
+// The plant record is deleted last, all inside one transaction.
+//
+
+const getPermanentDeletePlants = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+        SELECT
+          plant_id,
+          image_id,
+          scientific_name,
+          common_name,
+          family,
+          habitat,
+          distribution,
+          edible_parts,
+          nutritional_value,
+          flowering_season,
+          conservation_status,
+          image_url,
+          latitude,
+          longitude,
+          uploaded_by,
+          verified_status,
+          created_date,
+          image_mime_type,
+          source_plant_id,
+          version,
+          deleted_at
+        FROM plant_table
+        WHERE deleted_at IS NOT NULL
+        ORDER BY deleted_at DESC, plant_id DESC
+      `
+    );
+
+    return res.status(200).json({
+      plants: result.rows
+    });
+
+  } catch (error) {
+    console.error("Admin get permanent-delete plants error:", error);
+
+    return res.status(500).json({
+      message: "Unable to retrieve permanently deleted plant records"
+    });
+  }
+};
+
+
+// ============================================================
+// GET ONE PLANT FOR PERMANENT DELETE
+// ============================================================
+
+const getPermanentDeletePlantById = async (req, res) => {
+  try {
+    const plantId = Number(req.params.id);
+
+    if (!Number.isInteger(plantId) || plantId <= 0) {
+      return res.status(400).json({
+        message: "Invalid plant ID"
+      });
+    }
+
+    const result = await pool.query(
+      `
+        SELECT
+          plant_id,
+          image_id,
+          scientific_name,
+          common_name,
+          family,
+          habitat,
+          distribution,
+          edible_parts,
+          nutritional_value,
+          flowering_season,
+          conservation_status,
+          image_url,
+          latitude,
+          longitude,
+          uploaded_by,
+          verified_status,
+          created_date,
+          image_mime_type,
+          source_plant_id,
+          version,
+          deleted_at
+        FROM plant_table
+        WHERE plant_id = $1
+          AND deleted_at IS NOT NULL
+      `,
+      [plantId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        message: "Soft-deleted plant record not found"
+      });
+    }
+
+    return res.status(200).json({
+      plant: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error(
+      "Admin get permanent-delete plant error:",
+      error
+    );
+
+    return res.status(500).json({
+      message: "Unable to retrieve plant record"
+    });
+  }
+};
+
+
+// ============================================================
+// PERMANENTLY DELETE PLANT
+// ============================================================
+
+const permanentlyDeletePlant = async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const plantId = Number(req.params.id);
+
+    if (!Number.isInteger(plantId) || plantId <= 0) {
+      return res.status(400).json({
+        message: "Invalid plant ID"
+      });
+    }
+
+    await client.query("BEGIN");
+
+    // --------------------------------------------------------
+    // GET AND LOCK THE PLANT
+    // --------------------------------------------------------
+
+    const plantResult = await client.query(
+      `
+        SELECT
+          plant_id,
+          image_id,
+          scientific_name,
+          common_name,
+          family,
+          image_url,
+          deleted_at
+        FROM plant_table
+        WHERE plant_id = $1
+          AND deleted_at IS NOT NULL
+        FOR UPDATE
+      `,
+      [plantId]
+    );
+
+    if (plantResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        message:
+          "Plant not found or the plant has not been soft-deleted"
+      });
+    }
+
+    const plant = plantResult.rows[0];
+
+    // --------------------------------------------------------
+    // DELETE OBSERVATIONS
+    // --------------------------------------------------------
+
+    const observationResult = await client.query(
+      `
+        DELETE FROM observation_table
+        WHERE plant_id = $1
+      `,
+      [plantId]
+    );
+
+    // --------------------------------------------------------
+    // DELETE NAVIGATION HISTORY
+    // --------------------------------------------------------
+
+    const navigationResult = await client.query(
+      `
+        DELETE FROM navigation_history_table
+        WHERE plant_id = $1
+      `,
+      [plantId]
+    );
+
+    // --------------------------------------------------------
+    // DELETE PLANT
+    // --------------------------------------------------------
+
+    await client.query(
+      `
+        DELETE FROM plant_table
+        WHERE plant_id = $1
+          AND deleted_at IS NOT NULL
+      `,
+      [plantId]
+    );
+
+    // --------------------------------------------------------
+    // COMMIT
+    // --------------------------------------------------------
+
+    await client.query("COMMIT");
+
+    return res.status(200).json({
+      message: "Plant permanently deleted successfully",
+
+      deleted_plant: {
+        plant_id: plant.plant_id,
+        scientific_name: plant.scientific_name,
+        common_name: plant.common_name,
+        image_id: plant.image_id,
+        image_url: plant.image_url
+      },
+
+      deleted_records: {
+        observations: observationResult.rowCount,
+        navigation_history: navigationResult.rowCount
+      }
+    });
+
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.error(
+        "Permanent delete rollback error:",
+        rollbackError
+      );
+    }
+
+    console.error(
+      "Admin permanently delete plant error:",
+      error
+    );
+
+    // PostgreSQL foreign-key violation
+    if (error.code === "23503") {
+      return res.status(409).json({
+        message:
+          "This plant cannot be permanently deleted because other records still reference it."
+      });
+    }
+
+    return res.status(500).json({
+      message: "Unable to permanently delete plant"
+    });
+
+  } finally {
+    client.release();
+  }
+};
+
+
 // GET APPROVAL WORKFLOW HIERARCHY
 
 const getHierarchy = async (req, res) => {
@@ -1788,6 +2463,19 @@ module.exports = {
   deactivateUser,
   reactivateUser,
   deleteUser,
+
+
+  // Plant management
+  getPlants,
+  getPlantById,
+  updatePlant,
+  deletePlant,
+
+  
+  //Permanent-Delete
+  getPermanentDeletePlants,
+  getPermanentDeletePlantById,
+  permanentlyDeletePlant,
 
   // Approval workflow hierarchy
   getHierarchy,

@@ -14,6 +14,23 @@ const {
     deleteUser,
 
 
+
+    // Plant management
+    getPlants,
+    getPlantById,
+    updatePlant,
+    deletePlant,
+
+      // ========================================================
+    // PERMANENT DELETE - PLANT CONTENT
+    // ========================================================
+
+    getPermanentDeletePlants,
+    getPermanentDeletePlantById,
+    permanentlyDeletePlant,
+
+
+
     // ========================================================
     // APPROVAL WORKFLOW HIERARCHY
     // ========================================================
@@ -161,6 +178,75 @@ router.delete(
 
     deleteUser
 
+);
+
+
+// ============================================================
+// PERMANENT DELETE - PLANT CONTENT
+// ADMIN ONLY
+// ============================================================
+
+// GET ALL SOFT-DELETED PLANTS
+
+router.get(
+    "/permanent-delete",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    getPermanentDeletePlants
+);
+
+
+// GET ONE SOFT-DELETED PLANT
+
+router.get(
+    "/permanent-delete/:id",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    getPermanentDeletePlantById
+);
+
+
+// PERMANENTLY DELETE PLANT
+
+router.delete(
+    "/permanent-delete/:id",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    permanentlyDeletePlant
+);
+
+// ==================== PLANT MANAGEMENT ====================
+
+// Get all active plants
+router.get(
+    "/plants",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    getPlants
+);
+
+// Get one active plant by ID
+router.get(
+    "/plants/:id",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    getPlantById
+);
+
+// Update an active plant
+router.put(
+    "/plants/:id",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    updatePlant
+);
+
+// Soft-delete an active plant
+router.delete(
+    "/plants/:id",
+    authenticateToken,
+    authorizeRoles("ADMIN"),
+    deletePlant
 );
 
 

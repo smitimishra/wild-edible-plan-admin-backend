@@ -30,9 +30,7 @@ const authenticateToken = async (req, res, next) => {
             process.env.JWT_SECRET
         );
 
-        // --------------------------------------------------------
         // VALIDATE SESSION IS STILL ACTIVE IN user_sessions TABLE
-        // --------------------------------------------------------
 
         if (decoded.session_id) {
 
