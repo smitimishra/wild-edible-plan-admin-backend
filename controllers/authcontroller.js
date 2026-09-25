@@ -39,6 +39,20 @@ const login = async (req, res) => {
 
         const normalizedEmail = email.trim().toLowerCase();
 
+        const blockedResult = await pool.query(
+            `SELECT user_id
+             FROM blocked_users
+             WHERE LOWER(email_id) = LOWER($1)
+             LIMIT 1`,
+            [normalizedEmail]
+        );
+
+        if (blockedResult.rows.length > 0) {
+            return res.status(403).json({
+                message: "account_blocked"
+            });
+        }
+
 
         // ----------------------------------------------------
         // LOAD LOCKOUT SETTINGS
@@ -257,6 +271,32 @@ const login = async (req, res) => {
 
 
             if (attemptsLeft === 0) {
+
+                const adminUserResult = await pool.query(
+                    `SELECT user_id, user_name, email_id
+                     FROM user_table
+                     WHERE LOWER(email_id) = LOWER($1)
+                     LIMIT 1`,
+                    [normalizedEmail]
+                );
+
+                if (adminUserResult.rows.length > 0) {
+                    const adminUser = adminUserResult.rows[0];
+
+                    await pool.query(
+                        `INSERT INTO blocked_users
+                            (user_id, user_name, email_id, blocked_at)
+                         SELECT $1, $2, $3, CURRENT_TIMESTAMP
+                         WHERE NOT EXISTS (
+                            SELECT 1 FROM blocked_users WHERE user_id = $1
+                         )`,
+                        [
+                            adminUser.user_id,
+                            adminUser.user_name,
+                            adminUser.email_id
+                        ]
+                    );
+                }
 
                 // Just got locked — find the lockout
                 // start time

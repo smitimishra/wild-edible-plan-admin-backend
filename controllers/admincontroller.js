@@ -1957,21 +1957,35 @@ const getBlockedUsers = async (req, res) => {
 
 
 const unblockUser = async (req, res) => {
+  const client = await pool.connect();
+
     try {
         const { userId } = req.params;
 
-        const result = await pool.query(
+    await client.query("BEGIN");
+
+    const result = await client.query(
             `DELETE FROM blocked_users
              WHERE user_id = $1
-             RETURNING user_id`,
+       RETURNING user_id, email_id`,
             [userId]
         );
 
         if (result.rows.length === 0) {
+      await client.query("ROLLBACK");
+
             return res.status(404).json({
                 message: "User is not blocked"
             });
         }
+
+    await client.query(
+      `DELETE FROM login_attempts
+       WHERE LOWER(email) = LOWER($1)`,
+      [result.rows[0].email_id]
+    );
+
+    await client.query("COMMIT");
 
         res.status(200).json({
             message: "User unblocked successfully",
@@ -1979,11 +1993,14 @@ const unblockUser = async (req, res) => {
         });
 
     } catch (error) {
+      await client.query("ROLLBACK");
         console.error("Error unblocking user:", error);
 
         res.status(500).json({
             message: "Failed to unblock user"
         });
+    } finally {
+      client.release();
     }
 };
 
