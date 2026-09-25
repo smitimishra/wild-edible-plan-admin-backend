@@ -15,6 +15,18 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 CREATE INDEX IF NOT EXISTS idx_login_attempts_email
     ON login_attempts (email, attempted_at DESC);
 
+-- 2. Keep the user details shown in the admin blocked-users screen.
+-- A block is automatically ignored by login after one hour based on blocked_at.
+CREATE TABLE IF NOT EXISTS blocked_users (
+    user_id     INT PRIMARY KEY,
+    user_name   VARCHAR(150) NOT NULL,
+    email_id    VARCHAR(150) NOT NULL,
+    blocked_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_blocked_users_email
+    ON blocked_users (email_id, blocked_at DESC);
+
 -- 2. System settings (key/value store for admin-configurable values)
 CREATE TABLE IF NOT EXISTS system_settings (
     key         VARCHAR(100) PRIMARY KEY,
