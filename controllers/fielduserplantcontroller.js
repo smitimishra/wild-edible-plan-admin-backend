@@ -200,49 +200,111 @@ const createFieldUserPlant = async (req, res) => {
             request: result.rows[0]
 
         });
+        } catch (error) {
 
+    console.error("========================================");
+    console.error("FIELD USER PLANT SUBMISSION ERROR");
+    console.error("========================================");
 
-    } catch (error) {
+    console.error("ERROR NAME:", error.name);
+    console.error("ERROR MESSAGE:", error.message);
+    console.error("ERROR CODE:", error.code);
+    console.error("ERROR DETAIL:", error.detail);
+    console.error("ERROR HINT:", error.hint);
+    console.error("ERROR TABLE:", error.table);
+    console.error("ERROR COLUMN:", error.column);
+    console.error("ERROR CONSTRAINT:", error.constraint);
 
-        console.error(
-            "FIELD USER PLANT SUBMISSION ERROR:",
-            error
-        );
+    console.error("USER:", req.user);
 
+    console.error("FILE:", req.file);
 
-        // Delete uploaded image if DB insertion failed
+    console.error("BODY:", req.body);
 
-        if (req.file) {
+    console.error("========================================");
 
-            fs.unlink(
-                req.file.path,
-                (unlinkError) => {
+    // Delete uploaded image if DB insertion failed
+    if (req.file) {
 
-                    if (unlinkError) {
+        fs.unlink(
+            req.file.path,
+            (unlinkError) => {
 
-                        console.error(
-                            "Failed to delete uploaded image:",
-                            unlinkError
-                        );
+                if (unlinkError) {
 
-                    }
+                    console.error(
+                        "Failed to delete uploaded image:",
+                        unlinkError
+                    );
+
+                } else {
+
+                    console.log(
+                        "Uploaded image deleted after DB failure:",
+                        req.file.path
+                    );
 
                 }
-            );
-
-        }
-
-
-        return res.status(500).json({
-
-            success: false,
-
-            message:
-                "Failed to submit plant"
-
-        });
-
+            }
+        );
     }
+
+    return res.status(500).json({
+
+        success: false,
+
+        message: "Failed to submit plant",
+
+        error: error.message,
+
+        code: error.code || null
+
+    });
+}
+
+
+
+    // } catch (error) {
+
+    //     console.error(
+    //         "FIELD USER PLANT SUBMISSION ERROR:",
+    //         error
+    //     );
+
+
+    //     // Delete uploaded image if DB insertion failed
+
+    //     if (req.file) {
+
+    //         fs.unlink(
+    //             req.file.path,
+    //             (unlinkError) => {
+
+    //                 if (unlinkError) {
+
+    //                     console.error(
+    //                         "Failed to delete uploaded image:",
+    //                         unlinkError
+    //                     );
+
+    //                 }
+
+    //             }
+    //         );
+
+    //     }
+
+
+    //     return res.status(500).json({
+
+    //         success: false,
+
+    //         message:
+    //             "Failed to submit plant"
+
+    //     });
+
+    // }
 
 };
 
