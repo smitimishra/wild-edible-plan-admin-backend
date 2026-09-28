@@ -4,35 +4,21 @@ const upload = require("../middleware/uploadMiddleware");
 
 const {
     createRequest,
-
     reviewerApproveRequest,
-
     hrApproveRequest,
-
     rejectRequest,
-
     getAllRequests,
-
     getMyRequests,
-
     getPendingReviewerRequests,
-
     getPendingHRRequests,
-
     getApprovedRequests,
-
     getRequestById,
-
     downloadAttachment,
-
     addAttachment,
-
     deleteAttachment
-
 } = require("../controllers/requestcontroller");
 
 const authenticateToken = require("../middleware/authMiddleware");
-
 const authorizeRoles = require("../middleware/roleMiddleware");
 
 const router = express.Router();
@@ -62,7 +48,7 @@ router.get(
 
 
 // ============================================================
-// GET PENDING REVIEWER REQUESTS
+// GET PENDING REVIEWER / ADMIN REQUESTS
 //
 // Workflow:
 //
@@ -70,13 +56,16 @@ router.get(
 //    ↓
 // PENDING_REVIEWER
 //
-// Only REVIEWER can access these requests.
+// REVIEWER and ADMIN can access these requests.
 // ============================================================
 
 router.get(
     "/pending-reviewer",
     authenticateToken,
-    authorizeRoles("REVIEWER"),
+    authorizeRoles(
+        "REVIEWER",
+        "ADMIN"
+    ),
     getPendingReviewerRequests
 );
 
@@ -124,6 +113,7 @@ router.get(
 // Allowed:
 //
 // REVIEWER
+// ADMIN
 // HR
 // EMPLOYEE
 // ============================================================
@@ -133,6 +123,7 @@ router.get(
     authenticateToken,
     authorizeRoles(
         "REVIEWER",
+        "ADMIN",
         "HR",
         "EMPLOYEE"
     ),
@@ -171,15 +162,15 @@ router.post(
 
 
 // ============================================================
-// REVIEWER APPROVES REQUEST
+// REVIEWER / ADMIN APPROVES REQUEST
 //
 // Workflow:
 //
 // PENDING_REVIEWER
 //        ↓
-// REVIEWER APPROVES
+// REVIEWER OR ADMIN APPROVES
 //        ↓
-// PENDING_HR
+// APPROVED
 //
 // Body:
 //
@@ -191,7 +182,10 @@ router.post(
 router.put(
     "/:id/reviewer-approve",
     authenticateToken,
-    authorizeRoles("REVIEWER"),
+    authorizeRoles(
+        "REVIEWER",
+        "ADMIN"
+    ),
     reviewerApproveRequest
 );
 
@@ -221,9 +215,9 @@ router.put(
 
 
 // ============================================================
-// REVIEWER / HR REJECT REQUEST
+// REVIEWER / ADMIN / HR REJECT REQUEST
 //
-// Reviewer:
+// Reviewer / Admin:
 //
 // PENDING_REVIEWER → REJECTED
 //
@@ -241,6 +235,7 @@ router.put(
     authenticateToken,
     authorizeRoles(
         "REVIEWER",
+        "ADMIN",
         "HR"
     ),
     rejectRequest
@@ -272,7 +267,7 @@ router.get(
 // ============================================================
 // ADD IMAGE TO EXISTING REQUEST
 //
-// REVIEWER / HR
+// REVIEWER / ADMIN / HR
 //
 // multipart/form-data
 //
@@ -290,6 +285,7 @@ router.post(
     authenticateToken,
     authorizeRoles(
         "REVIEWER",
+        "ADMIN",
         "HR"
     ),
     upload.single("image"),
@@ -300,7 +296,7 @@ router.post(
 // ============================================================
 // DELETE REQUEST IMAGE
 //
-// REVIEWER / HR
+// REVIEWER / ADMIN / HR
 //
 // Example:
 //
@@ -312,6 +308,7 @@ router.delete(
     authenticateToken,
     authorizeRoles(
         "REVIEWER",
+        "ADMIN",
         "HR"
     ),
     deleteAttachment
