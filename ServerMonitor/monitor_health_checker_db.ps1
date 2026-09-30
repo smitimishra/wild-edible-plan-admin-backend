@@ -21,9 +21,9 @@
 # 1. CONFIGURATION
 # ============================================================
 
-$AngularUrl = "http://192.168.29.68:8200/welcome"
+$AngularUrl = "http://192.168.29.70:8200/welcome"
 
-$BackendHost = "192.168.29.68"
+$BackendHost = "192.168.29.70"
 
 $BackendPort = 8080
 
@@ -31,7 +31,7 @@ $BackendPort = 8080
 # POSTGRESQL DATABASE CONFIGURATION
 # ============================================================
 
-$DBHost = "192.168.29.68"
+$DBHost = "192.168.29.70"
 $DBPort = 5432
 $DBName = "wildplant"
 $DBUser = "postgres"

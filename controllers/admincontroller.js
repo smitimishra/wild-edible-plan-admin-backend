@@ -212,6 +212,9 @@ const formatUser = (user) => {
         ? true
         : user.is_active,
 
+    is_logged_in: user.is_logged_in === true,
+    last_login: user.last_login,
+
     approval_position_id: user.approval_position_id,
 
     approval_position: user.approval_position,
@@ -232,6 +235,22 @@ const getUsers = async (req, res) => {
                     email_id,
                     employee_code,
                     is_active,
+                    (
+                        COALESCE(user_table.is_active, TRUE) IS TRUE
+                        AND EXISTS (
+                            SELECT 1
+                            FROM user_sessions AS session
+                            WHERE session.user_id = user_table.user_id
+                              AND session.is_active IS TRUE
+                              AND session.invalidated_at IS NULL
+                              AND session.expires_at > CURRENT_TIMESTAMP
+                        )
+                    ) AS is_logged_in,
+                    (
+                        SELECT MAX(session.created_at)
+                        FROM user_sessions AS session
+                        WHERE session.user_id = user_table.user_id
+                    ) AS last_login,
                     approval_position_id,
                     approval_position
 
@@ -2606,14 +2625,24 @@ const deleteHierarchyLevel = async (req, res) => {
 };
 const getBlockedUsers = async (req, res) => {
     try {
+        await pool.query(`
+            DELETE FROM blocked_users
+            WHERE blocked_at <= NOW() - INTERVAL '1 hour'
+        `);
+
         const result = await pool.query(`
             SELECT
-                user_id,
-                user_name,
-                email_id,
-                blocked_at
-            FROM blocked_users
-            ORDER BY blocked_at DESC
+                blocked.user_id,
+                COALESCE(u.user_name, blocked.user_name) AS user_name,
+                COALESCE(u.email_id, blocked.email_id) AS email_id,
+                COALESCE(NULLIF(TRIM(r.role_name), ''), 'Unknown') AS role,
+                blocked.blocked_at
+            FROM blocked_users AS blocked
+            LEFT JOIN user_table AS u
+                ON u.user_id = blocked.user_id
+            LEFT JOIN role_table AS r
+                ON r.role_id = u.role_id
+            ORDER BY blocked.blocked_at DESC
         `);
 
         res.status(200).json({

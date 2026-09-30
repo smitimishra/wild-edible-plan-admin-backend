@@ -624,7 +624,7 @@ const forgotPassword = async (req, res) => {
 
     // RESET URL
 
-    const resetUrl = `http://192.168.29.68:4200/reset-password?token=${resetToken}`;
+    const resetUrl = `http://192.168.29.70:4200/reset-password?token=${resetToken}`;
 
     // EMAIL TRANSPORTER
 

@@ -22,6 +22,61 @@ router.post(
     login
 );
 
+router.post(
+    "/logout",
+    async (req, res) => {
+        const { token } = req.body || {};
+
+        if (!token) {
+            return res.status(400).json({
+                message: "Token is required"
+            });
+        }
+
+        let decoded;
+        try {
+            decoded = jwt.verify(token, process.env.JWT_SECRET);
+        } catch (error) {
+            return res.status(401).json({
+                message: "Invalid or expired token"
+            });
+        }
+
+        const sessionId = decoded.session_id || decoded.sessionId;
+
+        if (!sessionId || !decoded.id) {
+            return res.status(400).json({
+                message: "Session information is missing from token"
+            });
+        }
+
+        try {
+            await pool.query(
+                `
+                UPDATE user_sessions
+                SET
+                    is_active = FALSE,
+                    invalidated_at = COALESCE(invalidated_at, CURRENT_TIMESTAMP),
+                    invalidation_reason = 'user_logout'
+                WHERE session_id = $1
+                  AND user_id = $2
+                `,
+                [sessionId, decoded.id]
+            );
+
+            return res.status(200).json({
+                message: "Logged out successfully"
+            });
+        } catch (error) {
+            console.error("Logout error:", error);
+
+            return res.status(500).json({
+                message: "Unable to log out"
+            });
+        }
+    }
+);
+
 
 // ============================================================
 // REGISTER

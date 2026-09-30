@@ -21,9 +21,9 @@
 # 1. CONFIGURATION
 # ============================================================
 
-$AngularUrl = "http://192.168.29.68:8200/welcome"
+$AngularUrl = "http://192.168.29.70:8200/welcome"
 
-$BackendHost = "192.168.29.68"
+$BackendHost = "192.168.29.70"
 
 $BackendPort = 8080
 

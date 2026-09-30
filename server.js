@@ -333,7 +333,7 @@ const startServer = async () => {
                 );
 
                 console.log(
-                    `http://192.168.29.68:${PORT}`
+                    `http://192.168.29.70:${PORT}`
                 );
 
                 console.log(
